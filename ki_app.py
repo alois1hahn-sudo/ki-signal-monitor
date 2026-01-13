@@ -485,19 +485,60 @@ def calculate_market_breadth(market_data: pd.DataFrame) -> Tuple[float, str, str
         return 1.0, "Daten unvollständig", "error"
 
 
+def detect_fundamental_signal(news_items: List[Dict], keywords: List[str]) -> Tuple[bool, int, str]:
+    """
+    Automatically detect fundamental signals from news
+    
+    Args:
+        news_items: List of news items
+        keywords: Layer-specific keywords
+        
+    Returns:
+        Tuple of (has_signal, strength, reason)
+    """
+    if not news_items:
+        return False, 0, "Keine News verfügbar"
+    
+    strong_signals = 0
+    keyword_matches = 0
+    
+    # Analyze recent news (last 5)
+    for news in news_items[:5]:
+        signal_type, _ = analyze_news_sentiment(news, keywords)
+        
+        if signal_type == "STRONG":
+            strong_signals += 1
+        elif signal_type == "KEYWORD":
+            keyword_matches += 1
+    
+    # Scoring logic
+    if strong_signals >= 2:
+        return True, 4, f"{strong_signals} starke Signale in aktuellen News"
+    elif strong_signals >= 1:
+        return True, 3, f"{strong_signals} starkes Signal + {keyword_matches} Keywords"
+    elif keyword_matches >= 3:
+        return True, 2, f"{keyword_matches} relevante Keywords in News"
+    elif keyword_matches >= 1:
+        return True, 1, f"{keyword_matches} Keyword-Match"
+    
+    return False, 0, "Keine relevanten Signale"
+
+
 def calculate_layer_score(
     layer_config: LayerConfig,
     layer_data: pd.DataFrame,
-    fundamental_signal: bool,
+    news_items: List[Dict],
+    sensitivity: str = "Ausgewogen",
     lookback_periods: int = 126  # ~6 months of trading days
 ) -> Tuple[int, List[str]]:
     """
-    Calculate score for a specific investment layer
+    Calculate score for a specific investment layer with automatic signal detection
     
     Args:
         layer_config: Configuration for the layer
         layer_data: Price data for all layers
-        fundamental_signal: Whether fundamental signal is active
+        news_items: News items for this layer
+        sensitivity: Signal sensitivity setting
         lookback_periods: Number of periods to look back for performance
         
     Returns:
@@ -505,6 +546,15 @@ def calculate_layer_score(
     """
     score = 0
     details = []
+    
+    # Sensitivity thresholds
+    thresholds = {
+        "Konservativ": {"momentum": 20.0, "rel_strength": 3.0},
+        "Ausgewogen": {"momentum": 15.0, "rel_strength": 1.0},
+        "Aggressiv": {"momentum": 10.0, "rel_strength": 0.0}
+    }
+    
+    thresh = thresholds.get(sensitivity, thresholds["Ausgewogen"])
     
     try:
         # Calculate absolute performance
@@ -520,31 +570,36 @@ def calculate_layer_score(
         relative_strength = performance - spy_performance
         
         # Momentum scoring (0-3 points)
-        if performance > SCORING.momentum_threshold:
-            score += SCORING.momentum_points
+        if performance > thresh["momentum"]:
+            score += 3
             details.append(f"✅ Momentum: +{performance:.1f}% (stark)")
-        elif performance > 5:
-            score += 1  # Partial credit for moderate momentum
+        elif performance > thresh["momentum"] / 3:
+            score += 1
             details.append(f"📊 Momentum: +{performance:.1f}% (moderat)")
         else:
             details.append(f"📊 Momentum: {performance:.1f}%")
         
         # Relative strength scoring (0-3 points)
-        if relative_strength > SCORING.relative_strength_threshold:
-            score += SCORING.relative_strength_points
+        if relative_strength > thresh["rel_strength"]:
+            score += 3
             details.append(f"✅ Rel. Stärke: +{relative_strength:.1f}% vs SPY (outperformt)")
         elif relative_strength > -2:
-            score += 1  # Partial credit for keeping up with SPY
+            score += 1
             details.append(f"📊 Rel. Stärke: {relative_strength:.1f}% vs SPY (mitgehalten)")
         else:
             details.append(f"📉 Rel. Stärke: {relative_strength:.1f}% vs SPY (underperformt)")
         
-        # Fundamental signal bonus (0-4 points)
-        if fundamental_signal:
-            score += SCORING.fundamental_bonus
-            details.append(f"🔥 Katalysator-Booster aktiv (+{SCORING.fundamental_bonus} Punkte)")
+        # Automatic fundamental signal detection (0-4 points)
+        has_signal, signal_strength, signal_reason = detect_fundamental_signal(
+            news_items, 
+            layer_config.keywords
+        )
+        
+        if has_signal:
+            score += signal_strength
+            details.append(f"🔥 News-Signal: {signal_reason} (+{signal_strength})")
         else:
-            details.append(f"💤 Kein Katalysator erkannt (0/{SCORING.fundamental_bonus} verfügbar)")
+            details.append(f"💤 News-Signal: {signal_reason}")
             
     except Exception as e:
         logger.error(f"Error calculating score for {layer_config.name}: {str(e)}")
@@ -1006,49 +1061,19 @@ def main():
     # SIDEBAR - Controls
     # ========================================================================
     
-    st.sidebar.header("🎯 Katalysator-Booster")
-    st.sidebar.caption("Aktiviere wenn du wichtige fundamentale News siehst")
+    st.sidebar.header("⚙️ Dashboard-Einstellungen")
     
-    # Expander with explanation
-    with st.sidebar.expander("ℹ️ Was ist das?"):
-        st.markdown("""
-        **Katalysator-Booster** gibt +4 Punkte wenn du wichtige News erkennst:
-        
-        **Beispiele:**
-        - 💰 Große Aufträge/Deals
-        - 🏗️ CapEx-Ankündigungen
-        - 📈 Earnings-Beat
-        - 🤝 Strategische Partnerschaften
-        - 🔬 Produkt-Launches
-        
-        **Nutze es für:**
-        - Bestätigung von technischen Signalen
-        - Fundamental-Analyse Integration
-        - Event-getriebenes Trading
-        """)
+    # Auto-detect sensitivity
+    signal_sensitivity = st.sidebar.select_slider(
+        "🎯 Signal-Sensitivität",
+        options=["Konservativ", "Ausgewogen", "Aggressiv"],
+        value="Ausgewogen",
+        help="Wie streng sollen Kaufsignale bewertet werden?"
+    )
     
-    fundamental_signals = {}
-    signal_labels = {
-        "Hardware (SEMI)": "💻 Hardware: CapEx/Aufträge",
-        "Power (WUTI)": "⚡ Power: Energie-Deals",
-        "Build (XLI)": "🏗️ Build: Bau-Boom",
-        "MidCap (SPY4)": "📊 MidCap: Rotation/Inflows"
-    }
-    
-    for key, layer in LAYERS.items():
-        signal_key = f"signal_{key}"
-        label = signal_labels.get(key, f"{layer.name}: Signal")
-        fundamental_signals[key] = st.sidebar.checkbox(
-            label,
-            key=signal_key,
-            help=f"Aktivieren wenn wichtige News für {layer.description}"
-        )
-    
-    st.sidebar.markdown("---")
-    st.sidebar.info(
-        "💡 **Tipp:** Aktiviere Booster wenn du in den News konkrete "
-        "Katalysatoren siehst (z.B. 'NVIDIA erhält $5B Auftrag' oder "
-        "'Microsoft kauft 10 GW Strom von NextEra')"
+    st.sidebar.caption(
+        "📊 Das Dashboard analysiert automatisch News, "
+        "Momentum und relative Stärke für Kaufsignale"
     )
     
     # Layout option in sidebar
@@ -1103,15 +1128,26 @@ def main():
         layer_data = fetch_layer_data(period="1y")
     
     if layer_data is not None:
-        # Calculate scores for all layers
+        # Calculate scores for all layers with automatic signal detection
         layer_scores = {}
         layer_details = {}
+        layer_news = {}  # Store news to avoid re-fetching
         
         for key, layer in LAYERS.items():
+            # Fetch news for signal detection
+            news_items = fetch_news(
+                layer.news_ticker, 
+                layer.description, 
+                max_items=10,
+                use_demo=use_demo_news
+            )
+            layer_news[key] = news_items
+            
             score, details = calculate_layer_score(
                 layer,
                 layer_data,
-                fundamental_signals.get(key, False)
+                news_items,
+                sensitivity=signal_sensitivity
             )
             layer_scores[key] = score
             layer_details[key] = details
@@ -1144,14 +1180,8 @@ def main():
             
             for tab, (key, layer) in zip(tabs, LAYERS.items()):
                 with tab:
-                    with st.spinner(f"Lade News für {layer.name}..."):
-                        news_items = fetch_news(
-                            layer.news_ticker, 
-                            layer.description, 
-                            max_items=10,
-                            use_demo=use_demo_news
-                        )
-                    
+                    # Use pre-fetched news from score calculation
+                    news_items = layer_news.get(key, [])
                     render_news_feed(layer, news_items, layer_scores[key], compact=False, debug=debug_mode)
         
         else:
@@ -1160,14 +1190,8 @@ def main():
             
             for idx, (key, layer) in enumerate(LAYERS.items()):
                 with news_cols[idx % 2]:
-                    with st.spinner(f"Lade News für {layer.name}..."):
-                        news_items = fetch_news(
-                            layer.news_ticker, 
-                            layer.description, 
-                            max_items=5,
-                            use_demo=use_demo_news
-                        )
-                    
+                    # Use pre-fetched news from score calculation
+                    news_items = layer_news.get(key, [])
                     render_news_feed(layer, news_items, layer_scores[key], compact=True, debug=debug_mode)
         
     else:
