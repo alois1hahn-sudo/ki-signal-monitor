@@ -58,4 +58,40 @@ build_ok = st.sidebar.checkbox("Datacenter Bau-Boom?")
 
 if st.button("Signale jetzt analysieren", type="primary"):
     with st.spinner('Lade Marktdaten von Yahoo Finance...'):
-        tickers = ["SMH", "XLU", "XLI", "MDY",
+        # Ticker-Liste kompakt für stabilen Import
+        t_list = ["SMH", "XLU", "XLI", "MDY", "SPY"]
+        data = yf.download(t_list, period="1y", progress=False)['Close']
+        
+        scores = {'Hardware': 0, 'Power': 0, 'Build & Defence': 0, 'MidCaps': 0}
+        
+        # Hardware Score
+        if (data['SMH'].iloc[-1] / data['SMH'].iloc[-126]) > 1.15: 
+            scores['Hardware'] += 3
+        if capex_ok: 
+            scores['Hardware'] += 4
+
+        # Power Score
+        if (data['XLU'].iloc[-1]/data['XLU'].iloc[-126]) > (data['SPY'].iloc[-1]/data['SPY'].iloc[-126] + 0.05):
+            scores['Power'] += 3
+        if power_ok: 
+            scores['Power'] += 5
+
+        # Build Score
+        if (data['XLI'].iloc[-1] / data['XLI'].iloc[-126]) > 1.10: 
+            scores['Build & Defence'] += 3
+        if build_ok: 
+            scores['Build & Defence'] += 4
+
+        # MidCap Score
+        if (data['MDY'].iloc[-1]/data['MDY'].iloc[0]) > (data['SPY'].iloc[-1]/data['SPY'].iloc[0] + 0.05):
+            scores['MidCaps'] += 6
+
+        best = max(scores, key=scores.get)
+        st.success(f"### ✅ Empfehlung für Flex-Puffer: **{best}**")
+        
+        res_cols = st.columns(4)
+        for i, (layer, score) in enumerate(scores.items()):
+            res_cols[i].metric(layer, f"{score}/10")
+            res_cols[i].progress(score/10.0)
+
+st.caption(f"Stand: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
