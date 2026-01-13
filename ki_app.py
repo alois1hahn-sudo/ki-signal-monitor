@@ -5,6 +5,18 @@ from datetime import datetime
 st.set_page_config(page_title="KI-Infrastruktur Monitor", page_icon="🤖")
 
 st.title("🤖 KI-Infrastruktur Signal-Monitor")
+# Suchfeld für zusätzliche Analyse
+st.sidebar.header("🔍 Individual-Check")
+user_ticker = st.sidebar.text_input("Ticker-Symbol hinzufügen (z.B. AAPL, MSFT, ASML)", "").upper()
+
+if user_ticker:
+    try:
+        t_data = yf.Ticker(user_ticker).history(period="6mo")
+        if not t_data.empty:
+            t_perf = ((t_data['Close'].iloc[-1] / t_data['Close'].iloc[0]) - 1) * 100
+            st.sidebar.metric(f"Performance {user_ticker}", f"{t_perf:.1f}%")
+    except:
+        st.sidebar.error("Ticker nicht gefunden.")
 st.markdown("**Echtzeit-Analyse & Strategie-Check für den Flex-Puffer**")
 
 # Checkliste in der Seitenleiste
