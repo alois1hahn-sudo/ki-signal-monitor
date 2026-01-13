@@ -210,8 +210,75 @@ def fetch_news_from_google(query: str, max_items: int = 10) -> List[Dict]:
         return []
 
 
+def get_demo_news(ticker: str, layer_name: str, max_items: int = 5) -> List[Dict]:
+    """
+    Generate demo news for testing when APIs fail
+    
+    Args:
+        ticker: Stock ticker
+        layer_name: Layer description
+        max_items: Number of demo items
+        
+    Returns:
+        List of demo news items
+    """
+    import time
+    
+    demo_templates = {
+        "NVDA": [
+            ("NVIDIA Unveils Next-Gen Blackwell Architecture for AI Datacenters", "Reuters"),
+            ("Tech Giants Increase CapEx Spending on AI Infrastructure", "Bloomberg"),
+            ("Semiconductor Demand Surges Amid AI Boom", "CNBC"),
+            ("NVIDIA Secures Major Cloud Computing Contracts", "WSJ"),
+            ("AI Chip Market Expected to Double by 2026", "Financial Times")
+        ],
+        "NEE": [
+            ("NextEra Energy Announces Major Nuclear Power Expansion", "Energy News"),
+            ("Utilities Sector Benefits from AI Power Demand Growth", "Power Magazine"),
+            ("Grid Infrastructure Investment Reaches Record Levels", "Utility Dive"),
+            ("Small Modular Reactor Projects Gain Momentum", "Nuclear News"),
+            ("Renewable Energy Integration Accelerates", "Clean Energy Wire")
+        ],
+        "CAT": [
+            ("Caterpillar Reports Record Construction Equipment Backlog", "Industry Week"),
+            ("Infrastructure Spending Drives Industrial Growth", "Manufacturing News"),
+            ("Construction Equipment Orders Surge in Q4", "Equipment World"),
+            ("Industrial Sector Sees Strong Demand Signals", "Factory Talk"),
+            ("Heavy Machinery Sales Beat Expectations", "Construction Today")
+        ],
+        "IJH": [
+            ("Mid-Cap Stocks Show Strong Rotation Momentum", "MarketWatch"),
+            ("Small and Mid-Cap Growth Outperforms Large Caps", "Barron's"),
+            ("Market Breadth Improves as Mid-Caps Rally", "Investor's Business Daily"),
+            ("Fund Managers Increase Mid-Cap Allocations", "Morningstar"),
+            ("Mid-Cap ETFs See Record Inflows", "ETF Trends")
+        ]
+    }
+    
+    templates = demo_templates.get(ticker, [
+        (f"{ticker}: Strong Quarterly Performance Reported", "Financial News"),
+        (f"{ticker}: Analysts Raise Price Targets", "Market Insider"),
+        (f"Industry Outlook Positive for {ticker} Sector", "Sector Watch"),
+        (f"{ticker}: New Growth Initiatives Announced", "Business Wire"),
+        (f"Institutional Interest Growing in {ticker}", "Institutional Investor")
+    ])
+    
+    demo_news = []
+    current_time = int(time.time())
+    
+    for idx, (title, publisher) in enumerate(templates[:max_items]):
+        demo_news.append({
+            'title': f"[DEMO] {title}",
+            'link': f"https://finance.yahoo.com/quote/{ticker}",
+            'publisher': f"{publisher} (Demo Data)",
+            'timestamp': current_time - (idx * 3600)  # 1 hour apart
+        })
+    
+    return demo_news
+
+
 @st.cache_data(ttl=600, show_spinner=False)  # Cache for 10 minutes
-def fetch_news(ticker: str, layer_name: str = "", max_items: int = 10) -> List[Dict]:
+def fetch_news(ticker: str, layer_name: str = "", max_items: int = 10, use_demo: bool = False) -> List[Dict]:
     """
     Fetch news for a specific ticker with robust validation and fallback
     
@@ -219,10 +286,16 @@ def fetch_news(ticker: str, layer_name: str = "", max_items: int = 10) -> List[D
         ticker: Stock ticker symbol
         layer_name: Layer name for better Google search query
         max_items: Maximum number of news items to return
+        use_demo: If True, skip API calls and return demo news
         
     Returns:
         List of valid news dictionaries with title, link, and publisher
     """
+    # Demo mode - skip API calls
+    if use_demo:
+        logger.info(f"Using demo news for {ticker}")
+        return get_demo_news(ticker, layer_name, max_items)
+    
     # Try yfinance first
     try:
         logger.info(f"Fetching news for ticker: {ticker}")
@@ -273,7 +346,9 @@ def fetch_news(ticker: str, layer_name: str = "", max_items: int = 10) -> List[D
     except Exception as e:
         logger.error(f"Google News fallback failed for {ticker}: {str(e)}")
     
-    return []
+    # Ultimate fallback: demo news
+    logger.warning(f"All news sources failed for {ticker}, using demo data")
+    return get_demo_news(ticker, layer_name, max_items)
 
 
 # ============================================================================
@@ -545,9 +620,19 @@ def render_news_feed(layer_config: LayerConfig, news_items: List[Dict], score: i
     
     # Handle empty news
     if not news_items:
-        st.warning(f"📭 Keine News für **{layer_config.news_ticker}** verfügbar.")
+        st.error(f"❌ Keine News für **{layer_config.news_ticker}** verfügbar.")
+        
+        st.info("""
+        **Mögliche Lösungen:**
+        1. ✅ Aktiviere "Demo News verwenden" in der Sidebar
+        2. 🔄 Klicke "Neu laden" um Cache zu leeren
+        3. 📦 Stelle sicher dass `feedparser` installiert ist: `pip install feedparser`
+        4. 🌐 Prüfe deine Internet-Verbindung
+        5. ⏰ Warte 1-2 Minuten (API Rate Limits)
+        """)
+        
         if debug:
-            st.caption("⚠️ Sowohl yfinance als auch Google News lieferten keine Ergebnisse")
+            st.caption("🔧 Debug: Sowohl yfinance als auch Google News lieferten keine Ergebnisse")
         return
     
     # Scrollable news container
@@ -691,10 +776,20 @@ def main():
         index=0
     )
     
+    # Demo mode toggle
+    use_demo_news = st.sidebar.checkbox(
+        "🎭 Demo News verwenden",
+        value=False,
+        help="Nutze Demo-Daten wenn Live-APIs nicht verfügbar sind"
+    )
+    
     # Debug mode
     debug_mode = st.sidebar.checkbox("🔧 Debug Mode", value=False)
     if debug_mode:
         st.sidebar.caption("Zeigt zusätzliche Informationen zur News-Validierung")
+    
+    if use_demo_news:
+        st.sidebar.warning("⚠️ Demo-Modus aktiv - News sind Beispieldaten")
     
     # ========================================================================
     # MAIN CONTENT
@@ -760,7 +855,12 @@ def main():
             for tab, (key, layer) in zip(tabs, LAYERS.items()):
                 with tab:
                     with st.spinner(f"Lade News für {layer.name}..."):
-                        news_items = fetch_news(layer.news_ticker, layer.description, max_items=10)
+                        news_items = fetch_news(
+                            layer.news_ticker, 
+                            layer.description, 
+                            max_items=10,
+                            use_demo=use_demo_news
+                        )
                     
                     render_news_feed(layer, news_items, layer_scores[key], compact=False, debug=debug_mode)
         
@@ -771,7 +871,12 @@ def main():
             for idx, (key, layer) in enumerate(LAYERS.items()):
                 with news_cols[idx % 2]:
                     with st.spinner(f"Lade News für {layer.name}..."):
-                        news_items = fetch_news(layer.news_ticker, layer.description, max_items=5)
+                        news_items = fetch_news(
+                            layer.news_ticker, 
+                            layer.description, 
+                            max_items=5,
+                            use_demo=use_demo_news
+                        )
                     
                     render_news_feed(layer, news_items, layer_scores[key], compact=True, debug=debug_mode)
         
