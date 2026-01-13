@@ -2,74 +2,65 @@ import streamlit as st
 import yfinance as yf
 from datetime import datetime
 
-# 1. Konfiguration
-st.set_page_config(page_title="KI-Invest Cockpit", layout="wide", page_icon="📈")
-
+# 1. SETUP
+st.set_page_config(page_title="KI-Invest", layout="wide")
 st.title("🛡️ KI-Infrastruktur Strategie-Cockpit")
 
-# --- 2. MARKT-AMPEL (MAKRO-SIGNALE) ---
+# 2. MARKT-AMPEL
 st.subheader("🚦 Globale Markt-Ampel")
 try:
-    macro = yf.download(["^VIX", "^TNX"], period="5d", progress=False)['Close']
-    vix = macro["^VIX"].iloc[-1]
-    yields = macro["^TNX"].iloc[-1]
-
-    m_col1, m_col2, m_col3 = st.columns(3)
-    with m_col1:
-        if vix < 20: st.success(f"VIX: {vix:.2f} (Markt-Angst: Niedrig)")
-        elif vix < 30: st.warning(f"VIX: {vix:.2f} (Markt-Angst: Erhöht)")
-        else: st.error(f"VIX: {vix:.2f} (Panik-Modus!)")
-            
-    with m_col2:
-        st.info(f"US 10J Zinsen: {yields:.2f}%")
-        st.caption("Wichtig für Refinanzierung von Infrastruktur")
-
-    with m_col3:
-        rel_data = yf.download(["VGT", "URTH"], period="1mo", progress=False)['Close']
-        tech_rel = (rel_data["VGT"].iloc[-1]/rel_data["VGT"].iloc[0]) / (rel_data["URTH"].iloc[-1]/rel_data["URTH"].iloc[0])
-        if tech_rel > 1.02: st.success("Tech-Momentum: Stark")
+    m_data = yf.download(["^VIX", "^TNX", "VGT", "URTH"], period="5d", progress=False)['Close']
+    vix, yld = m_data["^VIX"].iloc[-1], m_data["^TNX"].iloc[-1]
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if vix < 20: st.success(f"VIX: {vix:.2f} (Ruhig)")
+        else: st.warning(f"VIX: {vix:.2f} (Nervös)")
+    with c2: st.info(f"US 10J Zinsen: {yld:.2f}%")
+    with c3:
+        rel = (m_data["VGT"].iloc[-1]/m_data["VGT"].iloc[0]) / (m_data["URTH"].iloc[-1]/m_data["URTH"].iloc[0])
+        if rel > 1.02: st.success("Tech-Momentum: Stark")
         else: st.warning("Tech-Momentum: Schwach")
-except:
-    st.write("Warte auf Marktdaten...")
+except: st.write("Lade Daten...")
 
 st.markdown("---")
 
-# --- 3. BESTANDSPORTFOLIO ---
+# 3. PORTFOLIO ÜBERSICHT
 st.header("1️⃣ Bestandsportfolio")
-bestands_etfs = {"MSCI World": "URTH", "InfoTech ETF": "VGT", "USA ETF": "VTI", "EM IMI": "EIMI.L"}
-cols_b = st.columns(len(bestands_etfs))
-for i, (name, ticker) in enumerate(bestands_etfs.items()):
-    with cols_b[i]:
-        url = "https://finance.yahoo.com/quote/" + ticker
-        st.markdown(f"### [{name}]({url})")
+b_etfs = {"MSCI World": "URTH", "InfoTech": "VGT", "USA": "VTI", "EM IMI": "EIMI.L"}
+cb = st.columns(4)
+for i, (n, t) in enumerate(b_etfs.items()):
+    cb[i].markdown(f"### [{n}](https://finance.yahoo.com/quote/{t})")
 
 st.markdown("---")
 
-# --- 4. ERGÄNZUNGSBLOCK ---
-st.header("2️⃣ KI-Infrastruktur Ergänzungsblock")
-ergaenzung = {
-    "Hardware": {"name": "MSCI Semiconductors", "sym": "SMH"},
-    "Power": {"name": "MSCI Utilities", "sym": "XLU"},
-    "Global Supply": {"name": "EM ex-China", "sym": "EMXC"},
-    "Build & Defence": {"name": "S&P 500 Industrials", "sym": "XLI"},
-    "MidCaps": {"name": "S&P 400 MidCap", "sym": "MDY"}
-}
-cols_e = st.columns(len(ergaenzung))
-for i, (layer, info) in enumerate(ergaenzung.items()):
-    with cols_e[i]:
-        url = "https://finance.yahoo.com/quote/" + info['sym']
-        st.markdown(f"**{layer}**\n#### [{info['name']}]({url})")
+st.header("2️⃣ KI-Ergänzungsblock")
+erg = {"Hardware": "SMH", "Power": "XLU", "Supply": "EMXC", "Build": "XLI", "MidCaps": "MDY"}
+ce = st.columns(5)
+for i, (l, t) in enumerate(erg.items()):
+    ce[i].markdown(f"**{l}**\n#### [{t}](https://finance.yahoo.com/quote/{t})")
 
 st.markdown("---")
 
-# --- 5. SIGNAL-CHECK ---
-st.sidebar.header("📝 Fundamentale Signale")
-capex_ok = st.sidebar.checkbox("KI-CapEx Hyperscaler >20% YoY?")
-power_ok = st.sidebar.checkbox("Neue Strom-Großverträge?")
-build_ok = st.sidebar.checkbox("Datacenter Bau-Boom?")
+# 4. ANALYSE-LOGIK
+st.sidebar.header("📝 Checkliste")
+f1 = st.sidebar.checkbox("CapEx >20%?")
+f2 = st.sidebar.checkbox("Strom-Deals?")
+f3 = st.sidebar.checkbox("Bau-Boom?")
 
-if st.button("Strategische Analyse starten", type="primary"):
-    with st.spinner('Berechne Scores...'):
-        t_list = ["SMH", "XLU", "XLI", "MDY", "SPY"]
-        data = yf.download(t_list, period="1y", progress=False)['Close']
-        scores = {'Hardware': 0, 'Power': 0, 'Build &
+if st.button("Analyse starten", type="primary"):
+    with st.spinner('Berechne...'):
+        df = yf.download(["SMH", "XLU", "XLI", "MDY", "SPY"], period="1y", progress=False)['Close']
+        s = {"Hardware": 0, "Power": 0, "Build": 0, "MidCaps": 0}
+        
+        # Scoring
+        if (df['SMH'].iloc[-1]/df['SMH'].iloc[-126]) > 1.15: s["Hardware"] += 3
+        if f1: s["Hardware"] += 4
+        if (df['XLU'].iloc[-1]/df['XLU'].iloc[-126]) > (df['SPY'].iloc[-1]/df['SPY'].iloc[-126] + 0.05): s["Power"] += 3
+        if f2: s["Power"] += 5
+        if (df['XLI'].iloc[-1]/df['XLI'].iloc[-126]) > 1.10: s["Build"] += 3
+        if f3: s["Build"] += 4
+        if (df['MDY'].iloc[-1]/df['MDY'].iloc[0]) > (df['SPY'].iloc[-1]/df['SPY'].iloc[0] + 0.05): s["MidCaps"] += 6
+
+        res = st.columns(4)
+        for i, (k, v) in enumerate(s.items()):
+            res[i].metric(k, f"{v}/
