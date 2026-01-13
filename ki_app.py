@@ -7,10 +7,10 @@ from datetime import datetime
 st.set_page_config(page_title="KI-Invest Cockpit", layout="wide")
 
 CONFIG = {
-    "Hardware": {"etfs": ["SEMI.AS", "EMXC"], "stocks": ["NVDA", "TSM", "ASML"], "color": "#1E90FF"},
-    "Power": {"etfs": ["WUTI.SW"], "stocks": ["NEE", "CEG", "VST"], "color": "#FFD700"},
+    "Hardware": {"etfs": ["SMH", "EMXC"], "stocks": ["NVDA", "TSM", "ASML"], "color": "#1E90FF"},
+    "Power": {"etfs": ["XLU"], "stocks": ["NEE", "CEG", "VST"], "color": "#FFD700"},
     "Build": {"etfs": ["XLI"], "stocks": ["GE", "CAT", "ETN"], "color": "#32CD32"},
-    "MidCap": {"etfs": ["SPY4.DE"], "stocks": ["PSTG", "FLEX", "HUBB"], "color": "#FF4500"}
+    "MidCap": {"etfs": ["IJH"], "stocks": ["PSTG", "FLEX", "HUBB"], "color": "#FF4500"}
 }
 
 st.title("🛡️ KI-Infrastruktur Strategie-Cockpit")
@@ -18,34 +18,34 @@ st.title("🛡️ KI-Infrastruktur Strategie-Cockpit")
 # 2. MARKT-AMPEL
 st.subheader("🚦 Globale Markt-Ampel")
 try:
-    # Wir nutzen deinen gewünschten Index ^SP500-20 als Tech-Benchmark
-    m_list = ["^VIX", "^TNX", "IWDA.AS", "^SP500-20"]
+    # Wir nutzen IJH für MidCaps und ^SP500-20 für Tech
+    m_list = ["^VIX", "^TNX", "SPY", "^SP500-20"]
     m_data = yf.download(m_list, period="5d", progress=False)['Close']
     vix, yld = m_data["^VIX"].iloc[-1], m_data["^TNX"].iloc[-1]
     c1, c2, c3 = st.columns(3)
     c1.metric("VIX (Angst)", f"{vix:.2f}")
     c2.metric("US 10J Zinsen", f"{yld:.2f}%")
-    tech_rel = (m_data["^SP500-20"].iloc[-1]/m_data["^SP500-20"].iloc[0]) / (m_data["IWDA.AS"].iloc[-1]/m_data["IWDA.AS"].iloc[0])
-    c3.metric("Tech vs World", f"{tech_rel:.2f}x")
+    # Tech-Stärke relativ zum breiten S&P 500
+    tech_rel = (m_data["^SP500-20"].iloc[-1]/m_data["^SP500-20"].iloc[0]) / (m_data["SPY"].iloc[-1]/m_data["SPY"].iloc[0])
+    c3.metric("Tech vs S&P 500", f"{tech_rel:.2f}x")
 except: st.write("Lade Makro-Daten...")
 
 st.markdown("---")
 
-# 3. PORTFOLIO & WATCHLIST (Korrektur USA Link & Name)
+# 3. PORTFOLIO & WATCHLIST (Korrekt verlinkt)
 st.header("1️⃣ Portfolio & ETF-Watchlist")
 watchlist = {
     "MSCI World": "IWDA.AS", 
     "InfoTech": "TNOW.PA", 
-    "S&P 500 Industrials": "%5ESP500-20", # Dein Wunsch-Link/Index
+    "S&P 500 Industrials": "%5ESP500-20", 
     "Semicon": "SEMI.AS", 
     "Utilities": "WUTI.SW", 
-    "MidCap": "SPY4.DE", 
+    "S&P 400 MidCap": "SPY4.DE", # Link bleibt, Messung unten via IJH
     "EM ex-China": "EMXC"
 }
 
 cols_w = st.columns(len(watchlist))
 for i, (name, ticker) in enumerate(watchlist.items()):
-    # Spezialbehandlung für den Index-Link mit % Zeichen
     url = f"https://finance.yahoo.com/quote/{ticker}"
     cols_w[i].markdown(f"**[{name}]({url})**")
 
@@ -58,42 +58,40 @@ f2 = st.sidebar.checkbox("Power: Neue Nuclear Deals?")
 f3 = st.sidebar.checkbox("Build: Bau-Rekorde?")
 
 if st.button("Strategie-Check ausführen", type="primary"):
-    with st.spinner('Berechne Scores und scanne Feeds...'):
-        # Daten für Messung
-        t_list = ["SEMI.AS", "WUTI.SW", "SPY4.DE", "EMXC", "IWDA.AS", "XLI"]
+    with st.spinner('Extrahiere Daten von stabilen US-Quellen...'):
+        # IJH ist der S&P 400 Proxy, XLU für Power, XLI für Industrials, SMH für Hardware
+        t_list = ["SMH", "XLU", "XLI", "IJH", "SPY"]
         df = yf.download(t_list, period="1y", progress=False)['Close']
         
-        # Performance-Werte
-        p_semi = (df['SEMI.AS'].iloc[-1]/df['SEMI.AS'].iloc[-126] - 1) * 100
-        p_wuti = (df['WUTI.SW'].iloc[-1]/df['WUTI.SW'].iloc[-126] - 1) * 100
-        p_mid = (df['SPY4.DE'].iloc[-1]/df['SPY4.DE'].iloc[-126] - 1) * 100
-        p_world = (df['IWDA.AS'].iloc[-1]/df['IWDA.AS'].iloc[-126] - 1) * 100
+        # Berechnung (6 Monate)
+        p_semi = (df['SMH'].iloc[-1]/df['SMH'].iloc[-126] - 1) * 100
+        p_power = (df['XLU'].iloc[-1]/df['XLU'].iloc[-126] - 1) * 100
+        p_mid = (df['IJH'].iloc[-1]/df['IJH'].iloc[-126] - 1) * 100
+        p_spy = (df['SPY'].iloc[-1]/df['SPY'].iloc[-126] - 1) * 100
         p_build = (df['XLI'].iloc[-1]/df['XLI'].iloc[-126] - 1) * 100
 
         scores = {"Hardware": 0, "Power": 0, "Build": 0, "MidCap": 0}
         details = {k: [] for k in scores.keys()}
 
-        # Scoring & Transparenz
+        # Logik mit stabilen Daten
         if p_semi > 15: 
             scores["Hardware"] += 3
             details["Hardware"].append(f"Momentum: +{p_semi:.1f}%")
-        if f1: 
-            scores["Hardware"] += 4
-            details["Hardware"].append("CapEx-Check")
+        if f1: scores["Hardware"] += 4
 
-        if (p_wuti - p_world) > 5:
+        if (p_power - p_spy) > 5:
             scores["Power"] += 3
-            details["Power"].append(f"Outperf: +{(p_wuti-p_world):.1f}%")
-        if f2:
-            scores["Power"] += 5
-            details["Power"].append("Energie-Deals")
+            details["Power"].append(f"Outperf vs Markt: +{(p_power-p_spy):.1f}%")
+        if f2: scores["Power"] += 5
 
         if p_build > 10:
             scores["Build"] += 3
-            details["Build"].append(f"Industrials: +{p_build:.1f}%")
-        if f3:
-            scores["Build"] += 4
-            details["Build"].append("Infrastruktur-Check")
+            details["Build"].append(f"Industrials Trend: +{p_build:.1f}%")
+        if f3: scores["Build"] += 4
+
+        if (p_mid - p_spy) > 5:
+            scores["MidCap"] += 6
+            details["MidCap"].append(f"Relative Stärke: +{(p_mid-p_spy):.1f}%")
 
         # Anzeige Scores
         st.header("2️⃣ Analyse-Ergebnis")
@@ -121,14 +119,11 @@ if st.button("Strategie-Check ausführen", type="primary"):
         
         with c_n2:
             st.write("**Aktuelle Feeds:**")
-            # News vom Haupt-Ticker des Gewinner-Layers
-            news_ticker = CONFIG[best]["stocks"][0]
-            news = yf.Ticker(news_ticker).news
+            news = yf.Ticker(CONFIG[best]["stocks"][0]).news
             if news:
                 for n in news[:3]:
                     t = n.get('title') or n.get('headline')
                     l = n.get('link') or n.get('url')
                     st.markdown(f"▫️ [{t}]({l})")
-            else: st.write("Keine aktuellen News gefunden.")
 
-st.caption(f"Update: {datetime.now().strftime('%d.%m.%Y %H:%M')} | Strategie: AI_INFRA_USA_FIX")
+st.caption(f"Daten: Yahoo Finance US-Proxy | Stand: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
