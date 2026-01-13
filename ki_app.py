@@ -542,7 +542,9 @@ def calculate_layer_score(
         # Fundamental signal bonus (0-4 points)
         if fundamental_signal:
             score += SCORING.fundamental_bonus
-            details.append(f"🔥 Fundamentaler Bonus (+{SCORING.fundamental_bonus})")
+            details.append(f"🔥 Katalysator-Booster aktiv (+{SCORING.fundamental_bonus} Punkte)")
+        else:
+            details.append(f"💤 Kein Katalysator erkannt (0/{SCORING.fundamental_bonus} verfügbar)")
             
     except Exception as e:
         logger.error(f"Error calculating score for {layer_config.name}: {str(e)}")
@@ -824,7 +826,157 @@ def render_news_feed(layer_config: LayerConfig, news_items: List[Dict], score: i
             col3.metric("🔹 General", signal_count['NEUTRAL'])
 
 
-def render_news_section(layer_config: LayerConfig, news_items: List[Dict]):
+def generate_recommendations(layer_scores: Dict[str, int], layer_details: Dict[str, List[str]], market_data: pd.DataFrame) -> List[Dict]:
+    """
+    Generate actionable investment recommendations
+    
+    Args:
+        layer_scores: Scores for each layer
+        layer_details: Details for each layer
+        market_data: Market indicator data
+        
+    Returns:
+        List of recommendation dictionaries
+    """
+    recommendations = []
+    
+    # Market conditions
+    vix = market_data["^VIX"].iloc[-1] if "^VIX" in market_data.columns else 20
+    market_fear = vix > 25
+    market_calm = vix < 15
+    
+    # Get top 2 layers
+    sorted_layers = sorted(layer_scores.items(), key=lambda x: x[1], reverse=True)
+    top_layer = sorted_layers[0]
+    second_layer = sorted_layers[1] if len(sorted_layers) > 1 else None
+    
+    # Strong buy signal (score >= 8)
+    if top_layer[1] >= 8:
+        layer_config = LAYERS[top_layer[0]]
+        recommendations.append({
+            "type": "BUY",
+            "priority": "HIGH",
+            "title": f"🟢 Starkes Kaufsignal: {layer_config.name}",
+            "action": f"Übergewichte {layer_config.etf} in deinem Portfolio",
+            "reasoning": f"Score {top_layer[1]}/10 - Technisch und fundamental stark",
+            "specific_tickers": f"Erwäge: {layer_config.etf} (ETF) oder {layer_config.stock} (Einzelaktie)",
+            "risk": "Niedrig" if market_calm else "Mittel"
+        })
+    
+    # Medium signal (score 5-7)
+    elif top_layer[1] >= 5:
+        layer_config = LAYERS[top_layer[0]]
+        recommendations.append({
+            "type": "WATCH",
+            "priority": "MEDIUM",
+            "title": f"🟡 Beobachten: {layer_config.name}",
+            "action": f"Füge {layer_config.etf} zur Watchlist hinzu",
+            "reasoning": f"Score {top_layer[1]}/10 - Moderates Signal, warte auf Bestätigung",
+            "specific_tickers": f"Beobachte: {layer_config.stock} News für Katalysatoren",
+            "risk": "Mittel"
+        })
+    
+    # Diversification if multiple strong
+    if second_layer and second_layer[1] >= 7 and top_layer[1] >= 7:
+        layer1 = LAYERS[top_layer[0]]
+        layer2 = LAYERS[second_layer[0]]
+        recommendations.append({
+            "type": "DIVERSIFY",
+            "priority": "MEDIUM",
+            "title": f"🔄 Diversifizierung möglich",
+            "action": f"Streue zwischen {layer1.etf} und {layer2.etf}",
+            "reasoning": "Beide Layers zeigen Stärke - reduziere Einzelrisiko",
+            "specific_tickers": f"Split: 50% {layer1.etf} + 50% {layer2.etf}",
+            "risk": "Niedrig"
+        })
+    
+    # Market warning
+    if market_fear:
+        recommendations.append({
+            "type": "CAUTION",
+            "priority": "HIGH",
+            "title": "⚠️ Erhöhte Volatilität",
+            "action": "Reduziere Positionsgrößen oder warte ab",
+            "reasoning": f"VIX bei {vix:.1f} - Markt ist nervös",
+            "specific_tickers": "Erwäge defensive Positionen oder Cash",
+            "risk": "Hoch"
+        })
+    
+    # No strong signals
+    if all(score < 5 for score in layer_scores.values()):
+        recommendations.append({
+            "type": "WAIT",
+            "priority": "LOW",
+            "title": "⏸️ Abwarten",
+            "action": "Keine starken Signale - bleibe in Cash oder bestehenden Positionen",
+            "reasoning": "Alle Layers unter 5/10 - kein klarer Trend",
+            "specific_tickers": "Nutze die Zeit für Research und Watchlist-Pflege",
+            "risk": "Niedrig (Cash)"
+        })
+    
+    return recommendations
+
+
+def render_recommendations_panel(recommendations: List[Dict]):
+    """Render actionable recommendations in a prominent panel"""
+    st.markdown("---")
+    st.header("🎯 Handlungsempfehlungen")
+    
+    if not recommendations:
+        st.info("Keine spezifischen Empfehlungen verfügbar.")
+        return
+    
+    # Priority sorting
+    priority_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+    recommendations.sort(key=lambda x: priority_order.get(x["priority"], 3))
+    
+    for rec in recommendations:
+        # Color coding by type
+        if rec["type"] == "BUY":
+            color = "#28a745"
+            icon = "🟢"
+        elif rec["type"] == "WATCH":
+            color = "#ffc107"
+            icon = "🟡"
+        elif rec["type"] == "CAUTION":
+            color = "#dc3545"
+            icon = "⚠️"
+        elif rec["type"] == "DIVERSIFY":
+            color = "#17a2b8"
+            icon = "🔄"
+        else:
+            color = "#6c757d"
+            icon = "⏸️"
+        
+        # Create recommendation card
+        with st.container():
+            col1, col2 = st.columns([4, 1])
+            
+            with col1:
+                st.markdown(f"### {rec['title']}")
+            
+            with col2:
+                priority_color = "red" if rec["priority"] == "HIGH" else "orange" if rec["priority"] == "MEDIUM" else "gray"
+                st.markdown(f"<span style='color: {priority_color}; font-weight: bold;'>{rec['priority']} PRIORITY</span>", unsafe_allow_html=True)
+            
+            st.markdown(f"**📋 Was tun:** {rec['action']}")
+            st.markdown(f"**💡 Warum:** {rec['reasoning']}")
+            st.markdown(f"**🎯 Konkret:** {rec['specific_tickers']}")
+            
+            col_risk, col_action = st.columns([1, 3])
+            with col_risk:
+                st.metric("Risiko", rec["risk"])
+            with col_action:
+                if rec["type"] in ["BUY", "WATCH", "DIVERSIFY"]:
+                    # Extract ticker from specific_tickers
+                    ticker_match = rec["specific_tickers"].split()[1] if len(rec["specific_tickers"].split()) > 1 else "SMH"
+                    st.link_button(
+                        f"📊 Chart auf TradingView öffnen",
+                        f"https://www.tradingview.com/chart/?symbol={ticker_match}",
+                        use_container_width=True
+                    )
+            
+            st.markdown("---")
     """
     Legacy function - kept for backwards compatibility
     """
@@ -854,22 +1006,49 @@ def main():
     # SIDEBAR - Controls
     # ========================================================================
     
-    st.sidebar.header("🛠️ Signal-Filter")
-    st.sidebar.caption("Aktiviere fundamentale Signale für erweiterte Bewertung")
+    st.sidebar.header("🎯 Katalysator-Booster")
+    st.sidebar.caption("Aktiviere wenn du wichtige fundamentale News siehst")
+    
+    # Expander with explanation
+    with st.sidebar.expander("ℹ️ Was ist das?"):
+        st.markdown("""
+        **Katalysator-Booster** gibt +4 Punkte wenn du wichtige News erkennst:
+        
+        **Beispiele:**
+        - 💰 Große Aufträge/Deals
+        - 🏗️ CapEx-Ankündigungen
+        - 📈 Earnings-Beat
+        - 🤝 Strategische Partnerschaften
+        - 🔬 Produkt-Launches
+        
+        **Nutze es für:**
+        - Bestätigung von technischen Signalen
+        - Fundamental-Analyse Integration
+        - Event-getriebenes Trading
+        """)
     
     fundamental_signals = {}
+    signal_labels = {
+        "Hardware (SEMI)": "💻 Hardware: CapEx/Aufträge",
+        "Power (WUTI)": "⚡ Power: Energie-Deals",
+        "Build (XLI)": "🏗️ Build: Bau-Boom",
+        "MidCap (SPY4)": "📊 MidCap: Rotation/Inflows"
+    }
+    
     for key, layer in LAYERS.items():
         signal_key = f"signal_{key}"
-        label = layer.name.split('(')[0].strip()
+        label = signal_labels.get(key, f"{layer.name}: Signal")
         fundamental_signals[key] = st.sidebar.checkbox(
-            f"{label}: Fundamental-Signal",
-            key=signal_key
+            label,
+            key=signal_key,
+            help=f"Aktivieren wenn wichtige News für {layer.description}"
         )
     
     st.sidebar.markdown("---")
     st.sidebar.info(
-        "💡 **Tipp:** Aktiviere Signale wenn du fundamentale "
-        "Katalysatoren (z.B. CapEx-Ankündigungen) siehst."
+        "💡 **Tipp:** Aktiviere Booster wenn du in den News konkrete "
+        "Katalysatoren siehst (z.B. 'NVIDIA erhält $5B Auftrag' oder "
+        "'Microsoft kauft 10 GW Strom von NextEra')"
     )
     
     # Layout option in sidebar
@@ -947,6 +1126,11 @@ def main():
                     layer_scores[key],
                     layer_details[key]
                 )
+        
+        # Generate and display recommendations
+        if market_data is not None:
+            recommendations = generate_recommendations(layer_scores, layer_details, market_data)
+            render_recommendations_panel(recommendations)
         
         # News section for ALL layers
         st.markdown("---")
