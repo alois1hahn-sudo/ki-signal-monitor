@@ -3,102 +3,96 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime
 
-st.set_page_config(page_title="KI-Strategie Monitor", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="KI-Invest Cockpit", layout="wide", page_icon="📈")
 
-st.title("🤖 KI-Infrastruktur Signal-Monitor")
-st.markdown("### Strategie-Check für den 20% Flex-Puffer (2026–2036)")
+# --- HEADER ---
+st.title("🛡️ KI-Infrastruktur Strategie-Cockpit 2026-2036")
+st.caption(f"Status: Aktiv | Letzter Check: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
 
-# --- ERKLÄRUNG DER SIGNALE ---
-with st.expander("ℹ️ Welche Signale werden geprüft? (Hier klicken)"):
-    st.markdown("""
-    | Sektor | Automatisches Signal (Preis) | Fundamentales Signal (Manuell) |
-    | :--- | :--- | :--- |
-    | **Hardware** | NVDA > 15% Performance (6 Monate) | KI-CapEx der Hyperscaler > 20% YoY |
-    | **Power** | Utilities (XLU) schlägt S&P 500 um > 5% | Neue Strom-Großverträge (z.B. Kernkraft/Amazon) |
-    | **Build** | Industrials (XLI) > 10% Performance (6 Monate) | Rekord-Bauvolumen bei Datacentern |
-    | **MidCaps** | S&P 400 (MDY) schlägt S&P 500 um > 5% | Kapitalrotation weg von Big Tech |
-    """)
+# --- 1️⃣ BESTANDSPORTFOLIO (STATISCH) ---
+st.header("1️⃣ Bestandsportfolio (170.000 €)")
+st.info("💡 Strategie: Halten, nicht weiter aufstocken. Wachstum erfolgt organisch.")
 
-# --- SIDEBAR: FUNDAMENTALE DATEN ---
+bestands_data = {
+    "Position": ["MSCI World", "InfoTech ETF", "USA ETF", "EM IMI"],
+    "Symbol": ["URTH", "VGT", "VTI", "EIMI.L"],
+    "Anteil": ["50,19%", "29,95%", "15,80%", "4,06%"]
+}
+
+cols = st.columns(4)
+for i, (pos, sym, ant) in enumerate(zip(bestands_data["Position"], bestands_data["Symbol"], bestands_data["Anteil"])):
+    with cols[i]:
+        url = f"https://finance.yahoo.com/quote/{sym}"
+        st.markdown(f"### [{pos}]({url})")
+        st.write(f"**Anteil:** {ant}")
+        st.caption(f"Ticker: {sym}")
+
+st.markdown("---")
+
+# --- 2️⃣ ERGÄNZUNGSBLOCK & SIGNALE ---
+st.header("2️⃣ KI-Infrastruktur Ergänzungsblock (40.000 €)")
+st.markdown("**Marktsignale für den monatlichen 300 € Flex-Puffer:**")
+
+# Sidebar für fundamentale Signale
 st.sidebar.header("📝 Fundamentale Signale")
-st.sidebar.info("Prüfe Nachrichten & Berichte:")
-capex_high = st.sidebar.checkbox("KI-CapEx Hyperscaler >20%?", value=True)
-power_deals = st.sidebar.checkbox("Neue Power-Deals / Stromverträge?")
-build_boom = st.sidebar.checkbox("Baubeginn neuer Mega-Datacenter?")
+capex_ok = st.sidebar.checkbox("KI-CapEx Hyperscaler >20% YoY?")
+power_ok = st.sidebar.checkbox("Neue Strom-Großverträge (Kernkraft)?")
+build_ok = st.sidebar.checkbox("Datacenter Bau-Boom (Reports)?")
 
-# --- INDIVIDUAL CHECK ---
-st.sidebar.header("🔍 Einzelwert-Check")
-user_ticker = st.sidebar.text_input("Ticker-Symbol (z.B. MSFT, ASML)", "").upper()
+# Liste der Ergänzungs-ETFs
+ergaenzung = {
+    "Hardware": {"sym": "SMH", "name": "MSCI Semiconductors"},
+    "Power": {"sym": "XLU", "name": "MSCI Utilities"},
+    "Supply": {"sym": "EMXC", "name": "EM ex-China"},
+    "Build": {"sym": "XLI", "name": "S&P 500 Industrials"},
+    "MidCaps": {"sym": "MDY", "name": "S&P 400 MidCap"}
+}
 
-# --- ANALYSE ---
-if st.button("🔄 Analyse & Strategie-Check starten", type="primary"):
-    signals = {'Hardware': 0, 'Power': 0, 'Build': 0, 'MidCaps': 0}
-    reasons = {k: [] for k in signals.keys()} # Speichert die Gründe für die Punkte
-    
-    with st.spinner('Marktdaten werden geladen...'):
-        # 1. Hardware
-        nvda_h = yf.Ticker("NVDA").history(period="6mo")
-        nvda_p = ((nvda_h['Close'].iloc[-1] / nvda_h['Close'].iloc[0]) - 1) * 100
-        if nvda_p > 15:
-            signals['Hardware'] += 3
-            reasons['Hardware'].append(f"✅ Preis-Momentum NVDA (+{nvda_p:.1f}%)")
-        if capex_high:
-            signals['Hardware'] += 4
-            reasons['Hardware'].append("✅ Hoher KI-CapEx bestätigt")
+if st.button("🔄 Analyse der KI-Layer starten", type="primary"):
+    with st.spinner('Berechne technische Signale aus Markt-Echtzeitdaten...'):
+        # Daten-Download
+        tickers = ["SMH", "XLU", "EMXC", "XLI", "MDY", "SPY"]
+        data = yf.download(tickers, period="1y")['Close']
+        
+        scores = {'Hardware': 0, 'Power': 0, 'Build': 0, 'MidCaps': 0}
+        
+        # LOGIK-ENGINE (6-Monats-Performance)
+        # Hardware (SMH & EMXC Kombi)
+        hw_perf = (data['SMH'].iloc[-1] / data['SMH'].iloc[-126] - 1) * 100
+        if hw_perf > 15: scores['Hardware'] += 3
+        if capex_ok: scores['Hardware'] += 4
 
-        # 2. Power
-        xlu_h = yf.Ticker("XLU").history(period="6mo")
-        spy_h = yf.Ticker("SPY").history(period="6mo")
-        xlu_p = (xlu_h['Close'].iloc[-1] / xlu_h['Close'].iloc[0] - 1) * 100
-        spy_p = (spy_h['Close'].iloc[-1] / spy_h['Close'].iloc[0] - 1) * 100
-        if (xlu_p - spy_p) > 5:
-            signals['Power'] += 3
-            reasons['Power'].append(f"✅ Outperformance vs. Markt (+{(xlu_p-spy_p):.1f}%)")
-        if power_deals:
-            signals['Power'] += 5
-            reasons['Power'].append("✅ Neue Stromverträge/Power-Deals")
+        # Power (Relativ zu Markt)
+        xlu_rel = (data['XLU'].iloc[-1]/data['XLU'].iloc[-126]) - (data['SPY'].iloc[-1]/data['SPY'].iloc[-126])
+        if xlu_rel > 0.05: scores['Power'] += 3
+        if power_ok: scores['Power'] += 5
 
-        # 3. Build & Defence
-        xli_h = yf.Ticker("XLI").history(period="6mo")
-        xli_p = (xli_h['Close'].iloc[-1] / xli_h['Close'].iloc[0] - 1) * 100
-        if xli_p > 10:
-            signals['Build'] += 3
-            reasons['Build'].append(f"✅ Industrials Trend (+{xli_p:.1f}%)")
-        if build_boom:
-            signals['Build'] += 4
-            reasons['Build'].append("✅ Datacenter Bauboom")
+        # Build & Defence
+        xli_perf = (data['XLI'].iloc[-1] / data['XLI'].iloc[-126] - 1) * 100
+        if xli_perf > 10: scores['Build'] += 3
+        if build_ok: scores['Build'] += 4
 
-        # 4. MidCaps (Rotation)
-        mdy_h = yf.Ticker("MDY").history(period="1y")
-        spy_h_1y = yf.Ticker("SPY").history(period="1y")
-        mdy_p = (mdy_h['Close'].iloc[-1] / mdy_h['Close'].iloc[0] - 1) * 100
-        spy_p_1y = (spy_h_1y['Close'].iloc[-1] / spy_h_1y['Close'].iloc[0] - 1) * 100
-        if (mdy_p - spy_p_1y) > 5:
-            signals['MidCaps'] += 6
-            reasons['MidCaps'].append(f"✅ Relative Stärke MidCaps (+{(mdy_p-spy_p_1y):.1f}%)")
+        # MidCaps
+        mdy_rel = (data['MDY'].iloc[-1]/data['MDY'].iloc[0]) - (data['SPY'].iloc[-1]/data['SPY'].iloc[0])
+        if mdy_rel > 0.05: scores['MidCaps'] += 6
 
-    # --- AUSGABE ---
-    best = max(signals, key=signals.get)
-    etf_map = {'Hardware': 'SOXQ/SMH', 'Power': 'XLU/VPU', 'Build': 'XLI', 'MidCaps': 'MDY'}
-    
-    st.success(f"## 🏆 Empfehlung für Flex-Puffer: **{etf_map[best]}** ({best})")
-    
-    cols = st.columns(4)
-    for i, (layer, score) in enumerate(signals.items()):
-        with cols[i]:
-            st.metric(layer, f"{score}/10")
-            for reason in reasons[layer]:
-                st.caption(reason)
-            st.progress(min(score / 10, 1.0))
+        # Anzeige der Ergebnisse
+        best_layer = max(scores, key=scores.get)
+        st.success(f"## 🎯 Empfehlung Flex-Puffer: **{best_layer} ({ergaenzung[best_layer]['sym']})**")
+        
+        # Spalten für Details
+        res_cols = st.columns(5)
+        for i, (layer, info) in enumerate(ergaenzung.items()):
+            # Da MidCaps in 'scores' aber Supply/EMXC extra ist, mappen wir kurz
+            score_val = scores.get(layer, 0)
+            with res_cols[i]:
+                url = f"https://finance.yahoo.com/quote/{info['sym']}"
+                st.markdown(f"**[{info['name']}]({url})**")
+                if layer in scores:
+                    st.metric(layer, f"{score_val}/10")
+                    st.progress(score_val/10)
+                else:
+                    st.caption("Feste Sparplan-Komponente")
 
-    # --- Einzelwert Check ---
-    if user_ticker:
-        st.markdown("---")
-        st.subheader(f"Zusatz-Check: {user_ticker}")
-        t_data = yf.Ticker(user_ticker).history(period="6mo")
-        if not t_data.empty:
-            perf = ((t_data['Close'].iloc[-1] / t_data['Close'].iloc[0]) - 1) * 100
-            st.line_chart(t_data['Close'])
-            st.write(f"Performance von {user_ticker} über 6 Monate: **{perf:.1f}%**")
-
-st.caption(f"Letzte Analyse: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+else:
+    st.info("Klicke auf den Button, um die Signale für deine Kaufentscheidung zu prüfen.")
