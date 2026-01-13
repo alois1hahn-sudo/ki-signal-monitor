@@ -248,21 +248,27 @@ def calculate_layer_score(
         
         relative_strength = performance - spy_performance
         
-        # Momentum scoring
+        # Momentum scoring (0-3 points)
         if performance > SCORING.momentum_threshold:
             score += SCORING.momentum_points
-            details.append(f"✅ Momentum: +{performance:.1f}%")
+            details.append(f"✅ Momentum: +{performance:.1f}% (stark)")
+        elif performance > 5:
+            score += 1  # Partial credit for moderate momentum
+            details.append(f"📊 Momentum: +{performance:.1f}% (moderat)")
         else:
             details.append(f"📊 Momentum: {performance:.1f}%")
         
-        # Relative strength scoring
+        # Relative strength scoring (0-3 points)
         if relative_strength > SCORING.relative_strength_threshold:
             score += SCORING.relative_strength_points
-            details.append(f"✅ Rel. Stärke: +{relative_strength:.1f}% vs SPY")
+            details.append(f"✅ Rel. Stärke: +{relative_strength:.1f}% vs SPY (outperformt)")
+        elif relative_strength > -2:
+            score += 1  # Partial credit for keeping up with SPY
+            details.append(f"📊 Rel. Stärke: {relative_strength:.1f}% vs SPY (mitgehalten)")
         else:
-            details.append(f"📊 Rel. Stärke: {relative_strength:.1f}% vs SPY")
+            details.append(f"📉 Rel. Stärke: {relative_strength:.1f}% vs SPY (underperformt)")
         
-        # Fundamental signal bonus
+        # Fundamental signal bonus (0-4 points)
         if fundamental_signal:
             score += SCORING.fundamental_bonus
             details.append(f"🔥 Fundamentaler Bonus (+{SCORING.fundamental_bonus})")
@@ -403,35 +409,130 @@ def render_layer_analysis(
             st.info(detail, icon="📊")
 
 
-def render_news_section(layer_config: LayerConfig, news_items: List[Dict]):
-    """Render news section for a specific layer"""
-    st.markdown("---")
-    st.header(f"📰 News-Radar: {layer_config.name}")
+def render_news_feed(layer_config: LayerConfig, news_items: List[Dict], score: int, compact: bool = False):
+    """
+    Render news feed for a specific layer in a styled, scrollable container
     
+    Args:
+        layer_config: Configuration for the layer
+        news_items: List of news items from yfinance
+        score: Current score for this layer
+        compact: If True, use more compact styling for column layout
+    """
     if not news_items:
-        st.info("Keine aktuellen News verfügbar.")
+        st.info(f"📭 Keine aktuellen News für {layer_config.name} verfügbar.")
         return
+    
+    # Header with score badge
+    header_html = f"""
+    <div style='
+        background: linear-gradient(135deg, {layer_config.color}22, {layer_config.color}11);
+        border-left: 4px solid {layer_config.color};
+        border-radius: 8px;
+        padding: {'10px' if compact else '15px'};
+        margin: 10px 0;
+    '>
+        <div style='display: flex; justify-content: space-between; align-items: center;'>
+            <h4 style='color: {layer_config.color}; margin: 0;'>
+                {layer_config.description}
+            </h4>
+            <span style='
+                background-color: {layer_config.color};
+                color: white;
+                padding: 4px 12px;
+                border-radius: 12px;
+                font-weight: bold;
+                font-size: {'11px' if compact else '13px'};
+            '>Score: {score}/10</span>
+        </div>
+    </div>
+    """
+    st.markdown(header_html, unsafe_allow_html=True)
+    
+    # Scrollable news container
+    max_height = "400px" if compact else "600px"
+    
+    container_start = f"""
+    <div style='
+        max-height: {max_height};
+        overflow-y: auto;
+        padding: 5px;
+        margin: 10px 0;
+    '>
+    """
+    
+    news_html_items = []
     
     for news in news_items:
         signal_type, icon = analyze_news_sentiment(news, layer_config.keywords)
         
-        col1, col2 = st.columns([1, 5])
+        title = news.get('title') or news.get('headline') or "Kein Titel"
+        link = news.get('link') or "#"
+        publisher = news.get('publisher', 'Unbekannt')
         
-        with col1:
-            if signal_type == "STRONG":
-                st.success(f"{icon} SIGNAL")
-            elif signal_type == "KEYWORD":
-                st.warning(f"{icon} KEYWORD")
-            else:
-                st.caption(f"{icon} News")
+        # Determine card styling based on signal type
+        if signal_type == "STRONG":
+            card_color = "#28a745"
+            badge = "🔥 STRONG SIGNAL"
+            badge_bg = "#d4edda"
+            border_width = "4px"
+        elif signal_type == "KEYWORD":
+            card_color = "#ffc107"
+            badge = "🎯 KEYWORD MATCH"
+            badge_bg = "#fff3cd"
+            border_width = "3px"
+        else:
+            card_color = "#6c757d"
+            badge = "🔹 General News"
+            badge_bg = "#e9ecef"
+            border_width = "2px"
         
-        with col2:
-            title = news.get('title') or news.get('headline') or "Kein Titel"
-            link = news.get('link') or "#"
-            publisher = news.get('publisher', 'Unbekannt')
-            
-            st.markdown(f"**[{title}]({link})**")
-            st.caption(f"Quelle: {publisher}")
+        # Create news card
+        card_html = f"""
+        <div style='
+            background-color: white;
+            border-left: {border_width} solid {card_color};
+            border-radius: 6px;
+            padding: {'8px' if compact else '12px'};
+            margin: {'6px 0' if compact else '8px 0'};
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        '>
+            <div style='
+                background-color: {badge_bg};
+                color: {card_color};
+                font-weight: bold;
+                font-size: {'10px' if compact else '11px'};
+                padding: {'2px 6px' if compact else '3px 8px'};
+                border-radius: 3px;
+                display: inline-block;
+                margin-bottom: {'4px' if compact else '8px'};
+            '>{badge}</div>
+            <div style='font-size: {'13px' if compact else '15px'}; font-weight: 600; margin: 6px 0;'>
+                <a href='{link}' target='_blank' style='color: #212529; text-decoration: none;'>
+                    {icon} {title}
+                </a>
+            </div>
+            <div style='font-size: {'11px' if compact else '12px'}; color: #6c757d;'>
+                📰 {publisher}
+            </div>
+        </div>
+        """
+        news_html_items.append(card_html)
+    
+    container_end = "</div>"
+    
+    # Combine all HTML
+    full_html = container_start + "".join(news_html_items) + container_end
+    st.markdown(full_html, unsafe_allow_html=True)
+
+
+def render_news_section(layer_config: LayerConfig, news_items: List[Dict]):
+    """
+    Legacy function - kept for backwards compatibility
+    """
+    render_news_feed(layer_config, news_items, 0, compact=False)
+
 
 
 # ============================================================================
@@ -461,14 +562,12 @@ def main():
     
     fundamental_signals = {}
     for key, layer in LAYERS.items():
-        if key != "MidCap (SPY4)":  # MidCap has no fundamental checkbox
-            signal_key = f"signal_{key}"
-            fundamental_signals[key] = st.sidebar.checkbox(
-                f"{layer.name.split('(')[0].strip()}: Fundamental-Signal",
-                key=signal_key
-            )
-        else:
-            fundamental_signals[key] = False
+        signal_key = f"signal_{key}"
+        label = layer.name.split('(')[0].strip()
+        fundamental_signals[key] = st.sidebar.checkbox(
+            f"{label}: Fundamental-Signal",
+            key=signal_key
+        )
     
     st.sidebar.markdown("---")
     st.sidebar.info(
@@ -476,10 +575,14 @@ def main():
         "Katalysatoren (z.B. CapEx-Ankündigungen) siehst."
     )
     
-    # Auto-refresh option
-    auto_refresh = st.sidebar.checkbox("🔄 Auto-Refresh (5 Min)", value=False)
-    if auto_refresh:
-        st.sidebar.caption("Dashboard aktualisiert sich automatisch")
+    # Layout option in sidebar
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📰 News Display")
+    news_layout = st.sidebar.radio(
+        "Layout wählen:",
+        ["Tabs (Übersichtlich)", "Alle gleichzeitig (Spalten)"],
+        index=0
+    )
     
     # ========================================================================
     # MAIN CONTENT
@@ -532,14 +635,33 @@ def main():
                     layer_details[key]
                 )
         
-        # News section for top-scoring layer
-        best_layer_key = max(layer_scores, key=layer_scores.get)
-        best_layer = LAYERS[best_layer_key]
+        # News section for ALL layers
+        st.markdown("---")
+        st.header("📰 News-Radar (Alle Layers)")
         
-        with st.spinner(f"📰 Lade News für {best_layer.name}..."):
-            news_items = fetch_news(best_layer.stock, max_items=5)
+        # Choose layout based on user preference
+        if news_layout == "Tabs (Übersichtlich)":
+            # TAB LAYOUT
+            tab_names = [layer.name for layer in LAYERS.values()]
+            tabs = st.tabs(tab_names)
+            
+            for tab, (key, layer) in zip(tabs, LAYERS.items()):
+                with tab:
+                    with st.spinner(f"Lade News für {layer.name}..."):
+                        news_items = fetch_news(layer.stock, max_items=10)
+                    
+                    render_news_feed(layer, news_items, layer_scores[key])
         
-        render_news_section(best_layer, news_items)
+        else:
+            # COLUMN LAYOUT - All visible at once
+            news_cols = st.columns(2)
+            
+            for idx, (key, layer) in enumerate(LAYERS.items()):
+                with news_cols[idx % 2]:
+                    with st.spinner(f"Lade News für {layer.name}..."):
+                        news_items = fetch_news(layer.stock, max_items=5)
+                    
+                    render_news_feed(layer, news_items, layer_scores[key], compact=True)
         
     else:
         st.error("⚠️ Layer-Daten konnten nicht geladen werden. Bitte später erneut versuchen.")
