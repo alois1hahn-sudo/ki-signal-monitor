@@ -579,7 +579,7 @@ def render_layer_analysis(
 
 def render_news_feed(layer_config: LayerConfig, news_items: List[Dict], score: int, compact: bool = False, debug: bool = False):
     """
-    Render news feed for a specific layer in a styled, scrollable container
+    Render news feed for a specific layer using native Streamlit components
     
     Args:
         layer_config: Configuration for the layer
@@ -588,31 +588,12 @@ def render_news_feed(layer_config: LayerConfig, news_items: List[Dict], score: i
         compact: If True, use more compact styling for column layout
         debug: If True, show debug information
     """
-    # Header with score badge
-    header_html = f"""
-    <div style='
-        background: linear-gradient(135deg, {layer_config.color}22, {layer_config.color}11);
-        border-left: 4px solid {layer_config.color};
-        border-radius: 8px;
-        padding: {'10px' if compact else '15px'};
-        margin: 10px 0;
-    '>
-        <div style='display: flex; justify-content: space-between; align-items: center;'>
-            <h4 style='color: {layer_config.color}; margin: 0;'>
-                {layer_config.description}
-            </h4>
-            <span style='
-                background-color: {layer_config.color};
-                color: white;
-                padding: 4px 12px;
-                border-radius: 12px;
-                font-weight: bold;
-                font-size: {'11px' if compact else '13px'};
-            '>Score: {score}/10</span>
-        </div>
-    </div>
-    """
-    st.markdown(header_html, unsafe_allow_html=True)
+    # Header with layer info
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown(f"### {layer_config.description}")
+    with col2:
+        st.metric("Score", f"{score}/10", label_visibility="visible")
     
     # Debug information
     if debug:
@@ -622,101 +603,75 @@ def render_news_feed(layer_config: LayerConfig, news_items: List[Dict], score: i
     if not news_items:
         st.error(f"❌ Keine News für **{layer_config.news_ticker}** verfügbar.")
         
-        st.info("""
-        **Mögliche Lösungen:**
-        1. ✅ Aktiviere "Demo News verwenden" in der Sidebar
-        2. 🔄 Klicke "Neu laden" um Cache zu leeren
-        3. 📦 Stelle sicher dass `feedparser` installiert ist: `pip install feedparser`
-        4. 🌐 Prüfe deine Internet-Verbindung
-        5. ⏰ Warte 1-2 Minuten (API Rate Limits)
-        """)
+        with st.expander("💡 Mögliche Lösungen"):
+            st.markdown("""
+            1. ✅ Aktiviere **"Demo News verwenden"** in der Sidebar
+            2. 🔄 Klicke **"Neu laden"** um Cache zu leeren
+            3. 📦 Stelle sicher dass `feedparser` installiert ist: `pip install feedparser`
+            4. 🌐 Prüfe deine Internet-Verbindung
+            5. ⏰ Warte 1-2 Minuten (API Rate Limits)
+            """)
         
         if debug:
             st.caption("🔧 Debug: Sowohl yfinance als auch Google News lieferten keine Ergebnisse")
         return
     
-    # Scrollable news container
-    max_height = "400px" if compact else "600px"
-    
-    container_start = f"""
-    <div style='
-        max-height: {max_height};
-        overflow-y: auto;
-        padding: 5px;
-        margin: 10px 0;
-    '>
-    """
-    
-    news_html_items = []
-    signal_count = {"STRONG": 0, "KEYWORD": 0, "NEUTRAL": 0}
-    
-    for news in news_items:
-        signal_type, icon = analyze_news_sentiment(news, layer_config.keywords)
-        signal_count[signal_type] += 1
+    # News container with scrolling
+    with st.container():
+        signal_count = {"STRONG": 0, "KEYWORD": 0, "NEUTRAL": 0}
         
-        title = news.get('title', 'Kein Titel')
-        link = news.get('link', '#')
-        publisher = news.get('publisher', 'Unbekannt')
+        for idx, news in enumerate(news_items):
+            signal_type, icon = analyze_news_sentiment(news, layer_config.keywords)
+            signal_count[signal_type] += 1
+            
+            title = news.get('title', 'Kein Titel')
+            link = news.get('link', '#')
+            publisher = news.get('publisher', 'Unbekannt')
+            
+            # Determine styling based on signal type
+            if signal_type == "STRONG":
+                badge_emoji = "🔥"
+                badge_text = "STRONG SIGNAL"
+                container_type = "success"
+            elif signal_type == "KEYWORD":
+                badge_emoji = "🎯"
+                badge_text = "KEYWORD MATCH"
+                container_type = "warning"
+            else:
+                badge_emoji = "🔹"
+                badge_text = "General News"
+                container_type = "info"
+            
+            # Create news card using native Streamlit
+            with st.container():
+                # Badge and title
+                col_badge, col_content = st.columns([1, 5])
+                
+                with col_badge:
+                    if signal_type == "STRONG":
+                        st.success(badge_emoji, icon=badge_emoji)
+                    elif signal_type == "KEYWORD":
+                        st.warning(badge_emoji, icon=badge_emoji)
+                    else:
+                        st.info(badge_emoji, icon=badge_emoji)
+                
+                with col_content:
+                    # Truncate long titles for compact mode
+                    display_title = title[:80] + "..." if compact and len(title) > 80 else title
+                    st.markdown(f"**[{display_title}]({link})**")
+                    st.caption(f"📰 {publisher}")
+                
+                # Divider between news items
+                if idx < len(news_items) - 1:
+                    st.divider()
         
-        # Determine card styling based on signal type
-        if signal_type == "STRONG":
-            card_color = "#28a745"
-            badge = "🔥 STRONG SIGNAL"
-            badge_bg = "#d4edda"
-            border_width = "4px"
-        elif signal_type == "KEYWORD":
-            card_color = "#ffc107"
-            badge = "🎯 KEYWORD MATCH"
-            badge_bg = "#fff3cd"
-            border_width = "3px"
-        else:
-            card_color = "#6c757d"
-            badge = "🔹 General News"
-            badge_bg = "#e9ecef"
-            border_width = "2px"
-        
-        # Create news card
-        card_html = f"""
-        <div style='
-            background-color: white;
-            border-left: {border_width} solid {card_color};
-            border-radius: 6px;
-            padding: {'8px' if compact else '12px'};
-            margin: {'6px 0' if compact else '8px 0'};
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            transition: transform 0.2s;
-        '>
-            <div style='
-                background-color: {badge_bg};
-                color: {card_color};
-                font-weight: bold;
-                font-size: {'10px' if compact else '11px'};
-                padding: {'2px 6px' if compact else '3px 8px'};
-                border-radius: 3px;
-                display: inline-block;
-                margin-bottom: {'4px' if compact else '8px'};
-            '>{badge}</div>
-            <div style='font-size: {'13px' if compact else '15px'}; font-weight: 600; margin: 6px 0;'>
-                <a href='{link}' target='_blank' style='color: #212529; text-decoration: none;'>
-                    {icon} {title[:100]}{'...' if len(title) > 100 else ''}
-                </a>
-            </div>
-            <div style='font-size: {'11px' if compact else '12px'}; color: #6c757d;'>
-                📰 {publisher}
-            </div>
-        </div>
-        """
-        news_html_items.append(card_html)
-    
-    container_end = "</div>"
-    
-    # Combine all HTML
-    full_html = container_start + "".join(news_html_items) + container_end
-    st.markdown(full_html, unsafe_allow_html=True)
-    
-    # Summary stats
-    if debug:
-        st.caption(f"📊 Signals: 🔥 {signal_count['STRONG']} | 🎯 {signal_count['KEYWORD']} | 🔹 {signal_count['NEUTRAL']}")
+        # Summary stats at bottom
+        if debug:
+            st.markdown("---")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("🔥 Strong", signal_count['STRONG'])
+            col2.metric("🎯 Keyword", signal_count['KEYWORD'])
+            col3.metric("🔹 General", signal_count['NEUTRAL'])
 
 
 def render_news_section(layer_config: LayerConfig, news_items: List[Dict]):
