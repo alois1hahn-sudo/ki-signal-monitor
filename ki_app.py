@@ -21,6 +21,7 @@ class LayerConfig:
     name: str
     etf: str
     stock: str
+    news_ticker: str  # Specific ticker for news (might differ from stock)
     color: str
     keywords: List[str]
     description: str
@@ -43,32 +44,36 @@ LAYERS = {
         name="Hardware (SEMI)",
         etf="SMH",
         stock="NVDA",
+        news_ticker="NVDA",  # NVDA has excellent news coverage
         color="#1E90FF",
-        keywords=["Blackwell", "CapEx", "Demand", "GPU", "AI chip"],
+        keywords=["Blackwell", "CapEx", "Demand", "GPU", "AI chip", "datacenter", "Jensen Huang"],
         description="Semiconductor & AI Hardware"
     ),
     "Power (WUTI)": LayerConfig(
         name="Power (WUTI)",
         etf="XLU",
         stock="NEE",
+        news_ticker="NEE",  # NextEra Energy - good coverage
         color="#FFD700",
-        keywords=["Nuclear", "Grid", "SMR", "Energy", "Power"],
+        keywords=["Nuclear", "Grid", "SMR", "Energy", "Power", "renewable", "utility"],
         description="Utilities & Energy Infrastructure"
     ),
     "Build (XLI)": LayerConfig(
         name="Build (XLI)",
         etf="XLI",
         stock="CAT",
+        news_ticker="CAT",  # Caterpillar - good coverage
         color="#32CD32",
-        keywords=["Backlog", "Construction", "Infrastructure", "Industrial"],
+        keywords=["Backlog", "Construction", "Infrastructure", "Industrial", "equipment", "manufacturing"],
         description="Industrial & Construction"
     ),
     "MidCap (SPY4)": LayerConfig(
         name="MidCap (SPY4)",
         etf="IJH",
         stock="PSTG",
+        news_ticker="IJH",  # Use the ETF for mid-cap news
         color="#FF4500",
-        keywords=["Rotation", "Small Cap", "Mid Cap", "Growth"],
+        keywords=["Rotation", "Small Cap", "Mid Cap", "Growth", "market breadth"],
         description="Mid-Cap Growth"
     )
 }
@@ -156,30 +161,61 @@ def fetch_layer_data(period: str = "1y") -> Optional[pd.DataFrame]:
 
 
 @st.cache_data(ttl=600, show_spinner=False)  # Cache for 10 minutes
-def fetch_news(ticker: str, max_items: int = 5) -> List[Dict]:
+def fetch_news(ticker: str, max_items: int = 10) -> List[Dict]:
     """
-    Fetch news for a specific ticker with caching
+    Fetch news for a specific ticker with robust validation
     
     Args:
         ticker: Stock ticker symbol
         max_items: Maximum number of news items to return
         
     Returns:
-        List of news dictionaries
+        List of valid news dictionaries with title, link, and publisher
     """
     try:
         logger.info(f"Fetching news for ticker: {ticker}")
-        news = yf.Ticker(ticker).news
         
-        if not news:
-            logger.warning(f"No news found for ticker: {ticker}")
+        # Fetch from yfinance
+        ticker_obj = yf.Ticker(ticker)
+        raw_news = ticker_obj.news
+        
+        if not raw_news:
+            logger.warning(f"No news returned from yfinance for {ticker}")
             return []
+        
+        logger.info(f"Raw news count for {ticker}: {len(raw_news)}")
+        
+        # Validate and clean news items
+        valid_news = []
+        for item in raw_news:
+            # Extract and validate required fields
+            title = item.get('title') or item.get('headline') or ""
+            link = item.get('link') or ""
+            publisher = item.get('publisher') or item.get('providerPublishTime') or "Unknown"
             
-        logger.info(f"Successfully fetched {len(news)} news items for {ticker}")
-        return news[:max_items]
+            # Only include news with valid title AND link
+            if title.strip() and link.strip() and link != "#":
+                valid_news.append({
+                    'title': title.strip(),
+                    'link': link.strip(),
+                    'publisher': publisher if isinstance(publisher, str) else "Unknown",
+                    'timestamp': item.get('providerPublishTime', 0)
+                })
+            else:
+                logger.debug(f"Skipping invalid news item: title={bool(title)}, link={bool(link)}")
+        
+        if not valid_news:
+            logger.warning(f"No valid news items found for {ticker} after filtering")
+            return []
+        
+        # Sort by timestamp (newest first)
+        valid_news.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
+        
+        logger.info(f"Successfully validated {len(valid_news)} news items for {ticker}")
+        return valid_news[:max_items]
         
     except Exception as e:
-        logger.error(f"Error fetching news for {ticker}: {str(e)}")
+        logger.error(f"Error fetching news for {ticker}: {str(e)}", exc_info=True)
         return []
 
 
@@ -409,7 +445,7 @@ def render_layer_analysis(
             st.info(detail, icon="📊")
 
 
-def render_news_feed(layer_config: LayerConfig, news_items: List[Dict], score: int, compact: bool = False):
+def render_news_feed(layer_config: LayerConfig, news_items: List[Dict], score: int, compact: bool = False, debug: bool = False):
     """
     Render news feed for a specific layer in a styled, scrollable container
     
@@ -418,11 +454,8 @@ def render_news_feed(layer_config: LayerConfig, news_items: List[Dict], score: i
         news_items: List of news items from yfinance
         score: Current score for this layer
         compact: If True, use more compact styling for column layout
+        debug: If True, show debug information
     """
-    if not news_items:
-        st.info(f"📭 Keine aktuellen News für {layer_config.name} verfügbar.")
-        return
-    
     # Header with score badge
     header_html = f"""
     <div style='
@@ -449,6 +482,20 @@ def render_news_feed(layer_config: LayerConfig, news_items: List[Dict], score: i
     """
     st.markdown(header_html, unsafe_allow_html=True)
     
+    # Debug information
+    if debug:
+        st.info(f"🔧 Debug: Ticker={layer_config.news_ticker}, News Count={len(news_items)}")
+    
+    # Handle empty news
+    if not news_items:
+        st.warning(f"📭 Keine validen News für **{layer_config.news_ticker}** verfügbar.")
+        if debug:
+            st.caption("Mögliche Gründe: yfinance API-Limit, keine aktuellen News, oder Ticker nicht gefunden")
+        
+        # Suggest alternative
+        st.info(f"💡 Alternative: Suche manuell nach '{layer_config.news_ticker} news' auf Google Finance")
+        return
+    
     # Scrollable news container
     max_height = "400px" if compact else "600px"
     
@@ -462,12 +509,14 @@ def render_news_feed(layer_config: LayerConfig, news_items: List[Dict], score: i
     """
     
     news_html_items = []
+    signal_count = {"STRONG": 0, "KEYWORD": 0, "NEUTRAL": 0}
     
     for news in news_items:
         signal_type, icon = analyze_news_sentiment(news, layer_config.keywords)
+        signal_count[signal_type] += 1
         
-        title = news.get('title') or news.get('headline') or "Kein Titel"
-        link = news.get('link') or "#"
+        title = news.get('title', 'Kein Titel')
+        link = news.get('link', '#')
         publisher = news.get('publisher', 'Unbekannt')
         
         # Determine card styling based on signal type
@@ -510,7 +559,7 @@ def render_news_feed(layer_config: LayerConfig, news_items: List[Dict], score: i
             '>{badge}</div>
             <div style='font-size: {'13px' if compact else '15px'}; font-weight: 600; margin: 6px 0;'>
                 <a href='{link}' target='_blank' style='color: #212529; text-decoration: none;'>
-                    {icon} {title}
+                    {icon} {title[:100]}{'...' if len(title) > 100 else ''}
                 </a>
             </div>
             <div style='font-size: {'11px' if compact else '12px'}; color: #6c757d;'>
@@ -525,6 +574,10 @@ def render_news_feed(layer_config: LayerConfig, news_items: List[Dict], score: i
     # Combine all HTML
     full_html = container_start + "".join(news_html_items) + container_end
     st.markdown(full_html, unsafe_allow_html=True)
+    
+    # Summary stats
+    if debug:
+        st.caption(f"📊 Signals: 🔥 {signal_count['STRONG']} | 🎯 {signal_count['KEYWORD']} | 🔹 {signal_count['NEUTRAL']}")
 
 
 def render_news_section(layer_config: LayerConfig, news_items: List[Dict]):
@@ -583,6 +636,11 @@ def main():
         ["Tabs (Übersichtlich)", "Alle gleichzeitig (Spalten)"],
         index=0
     )
+    
+    # Debug mode
+    debug_mode = st.sidebar.checkbox("🔧 Debug Mode", value=False)
+    if debug_mode:
+        st.sidebar.caption("Zeigt zusätzliche Informationen zur News-Validierung")
     
     # ========================================================================
     # MAIN CONTENT
@@ -648,9 +706,9 @@ def main():
             for tab, (key, layer) in zip(tabs, LAYERS.items()):
                 with tab:
                     with st.spinner(f"Lade News für {layer.name}..."):
-                        news_items = fetch_news(layer.stock, max_items=10)
+                        news_items = fetch_news(layer.news_ticker, max_items=10)
                     
-                    render_news_feed(layer, news_items, layer_scores[key])
+                    render_news_feed(layer, news_items, layer_scores[key], compact=False, debug=debug_mode)
         
         else:
             # COLUMN LAYOUT - All visible at once
@@ -659,9 +717,9 @@ def main():
             for idx, (key, layer) in enumerate(LAYERS.items()):
                 with news_cols[idx % 2]:
                     with st.spinner(f"Lade News für {layer.name}..."):
-                        news_items = fetch_news(layer.stock, max_items=5)
+                        news_items = fetch_news(layer.news_ticker, max_items=5)
                     
-                    render_news_feed(layer, news_items, layer_scores[key], compact=True)
+                    render_news_feed(layer, news_items, layer_scores[key], compact=True, debug=debug_mode)
         
     else:
         st.error("⚠️ Layer-Daten konnten nicht geladen werden. Bitte später erneut versuchen.")
