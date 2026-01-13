@@ -1,105 +1,124 @@
 import streamlit as st
 import yfinance as yf
+import pandas as pd
 from datetime import datetime
 
-# 1. SETUP
-st.set_page_config(page_title="KI-Invest Cockpit", layout="wide")
-st.title("🛡️ Strategisches KI-Invest Cockpit")
+# 1. SETUP & CONFIG
+st.set_page_config(page_title="AI Infra Monitor 2026", layout="wide")
 
-# 2. MARKT-AMPEL
-st.subheader("🚦 Globale Markt-Ampel")
-try:
-    m_list = ["^SP500-20", "^TNX", "^VIX", "IWDA.AS"]
-    m_d = yf.download(m_list, period="5d", progress=False)['Close']
-    vix, yld = m_d["^VIX"].iloc[-1], m_d["^TNX"].iloc[-1]
+# Deine Konfiguration als Datenstruktur
+CONFIG = {
+    "Hardware": {
+        "etfs": ["SMH", "EMXC"],
+        "top_stocks": ["NVDA", "TSM", "AVGO", "ASML"],
+        "keywords": ["GPU demand", "Blackwell", "CoWoS", "foundry capacity"],
+        "color": "#1E90FF"
+    },
+    "Power": {
+        "etfs": ["XLU", "WUTI.SW"],
+        "top_stocks": ["NEE", "CEG", "VST", "SO"],
+        "keywords": ["nuclear PPA", "data center power", "grid connection"],
+        "color": "#FFD700"
+    },
+    "Build": {
+        "etfs": ["XLI"],
+        "top_stocks": ["GE", "CAT", "ETN", "HON"],
+        "keywords": ["construction backlog", "datacenter buildout", "HVAC"],
+        "color": "#32CD32"
+    },
+    "MidCap": {
+        "etfs": ["SPY4.DE"],
+        "top_stocks": ["PSTG", "FLEX", "CIEN", "HUBB"],
+        "keywords": ["liquid cooling", "optical interconnect", "rotation"],
+        "color": "#FF4500"
+    }
+}
+
+st.title("🛡️ AI Infrastructure Monitor 2026-2036")
+st.caption("Echtzeit-Analyse basierend auf deiner Layer-Konfiguration")
+
+# 2. MARKT-AMPEL (MAKRO)
+with st.container():
+    st.subheader("🚦 Globale Markt-Ampel")
+    m_data = yf.download(["^VIX", "^TNX", "IWDA.AS", "^SP500-20"], period="5d", progress=False)['Close']
+    vix, yld = m_data["^VIX"].iloc[-1], m_data["^TNX"].iloc[-1]
     
     c1, c2, c3 = st.columns(3)
-    with c1:
-        if vix < 20: st.success(f"VIX: {vix:.2f} (Ruhig)")
-        else: st.warning(f"VIX: {vix:.2f} (Erhöht)")
-    with c2: st.info(f"US 10J Zinsen: {yld:.2f}%")
-    with c3:
-        rel = (m_d["^SP500-20"].iloc[-1]/m_d["^SP500-20"].iloc[0]) / (m_d["IWDA.AS"].iloc[-1]/m_d["IWDA.AS"].iloc[0])
-        if rel > 1.01: st.success("Tech-Momentum: Stark")
-        else: st.warning("Tech-Momentum: Neutral/Schwach")
-except: st.write("Warte auf Live-Daten...")
+    c1.metric("Markt-Angst (VIX)", f"{vix:.2f}", delta="- Ruhig" if vix < 20 else "+ Nervös", delta_color="inverse")
+    c2.metric("US 10J Zinsen", f"{yld:.2f}%")
+    
+    # Tech vs World Momentum
+    tech_mom = (m_data["^SP500-20"].iloc[-1]/m_d_start if (m_d_start := m_data["^SP500-20"].iloc[0]) else 1)
+    world_mom = (m_data["IWDA.AS"].iloc[-1]/m_w_start if (m_w_start := m_data["IWDA.AS"].iloc[0]) else 1)
+    c3.metric("Tech Momentum", f"{(tech_mom/world_mom):.2f}x", help="Verhältnis Tech-Wachstum zu Weltmarkt")
 
 st.markdown("---")
 
-# 3. PORTFOLIO ÜBERSICHT
-st.header("1️⃣ Portfolio & Watchlist")
-pos = {
-    "MSCI World (IWDA)": "IWDA.AS", "InfoTech (TNOW)": "TNOW.PA",
-    "USA (AYEWD)": "AYEWD.XD", "Semicon (SEMI)": "SEMI.AS",
-    "Utilities (WUTI)": "WUTI.SW", "MidCap (SP40)": "SP40.DE", "EM ex-China": "EMXC"
-}
-c_p = st.columns(4)
-for i, (n, t) in enumerate(pos.items()):
-    url = f"https://finance.yahoo.com/quote/{t}"
-    c_p[i % 4].markdown(f"**[{n}]({url})**")
-
-st.markdown("---")
-
-# 4. SIGNAL-ANALYSE & TRANSPARENZ
-st.sidebar.header("📝 Fundamentale Signale")
-f1 = st.sidebar.checkbox("KI-CapEx Hyperscaler >20%?")
-f2 = st.sidebar.checkbox("Neue Strom-Deals?")
-f3 = st.sidebar.checkbox("Datacenter Bau-Boom?")
+# 3. ANALYSIS ENGINE
+st.sidebar.header("📝 Fundamentale Checkliste")
+f_capex = st.sidebar.checkbox("Hardware: CapEx-Boom (>20%)?")
+f_power = st.sidebar.checkbox("Power: Neue Nuclear/PPA Deals?")
+f_build = st.sidebar.checkbox("Build: DC-Bau-Rekorde?")
 
 if st.button("Strategie-Check ausführen", type="primary"):
-    with st.spinner('Analysiere Sektoren...'):
-        df = yf.download(["SEMI.AS", "WUTI.SW", "SP40.DE", "EMXC", "IWDA.AS"], period="1y", progress=False)['Close']
+    with st.spinner('Scanne Ticker und News-Sentiment...'):
+        # Kurse laden für alle Layer
+        all_tickers = ["SMH", "XLU", "XLI", "SPY4.DE", "IWDA.AS"]
+        prices = yf.download(all_tickers, period="1y", progress=False)['Close']
         
-        # Berechnung der Performance-Werte (6 Monate = ca. 126 Handelstage)
-        perf_semi = (df['SEMI.AS'].iloc[-1]/df['SEMI.AS'].iloc[-126] - 1) * 100
-        perf_wuti = (df['WUTI.SW'].iloc[-1]/df['WUTI.SW'].iloc[-126] - 1) * 100
-        perf_world = (df['IWDA.AS'].iloc[-1]/df['IWDA.AS'].iloc[-126] - 1) * 100
-        perf_mid = (df['SP40.DE'].iloc[-1]/df['SP40.DE'].iloc[-126] - 1) * 100
-        perf_emxc = (df['EMXC'].iloc[-1]/df['EMXC'].iloc[-126] - 1) * 100
+        scores = {}
+        analysis_log = {}
 
-        s = {"Hardware": 0, "Power": 0, "Build": 0, "Global Supply": 0}
-        details = {k: [] for k in s.keys()}
-
-        # LOGIK TRANSPARENT MACHEN
-        # Hardware
-        if perf_semi > 15: 
-            s["Hardware"] += 3
-            details["Hardware"].append(f"Kurs-Stärke: +{perf_semi:.1f}% (>15%)")
-        if f1: 
-            s["Hardware"] += 4
-            details["Hardware"].append("Fundamentaler CapEx-Boom")
-        
-        # Power
-        if (perf_wuti - perf_world) > 5:
-            s["Power"] += 3
-            details["Power"].append(f"Outperformance: +{(perf_wuti-perf_world):.1f}%")
-        if f2:
-            s["Power"] += 5
-            details["Power"].append("Strategische Energie-Deals")
-        
-        # Build
-        if perf_mid > 10:
-            s["Build"] += 3
-            details["Build"].append(f"Infrastruktur-Trend: +{perf_mid:.1f}%")
-        if f3:
-            s["Build"] += 4
-            details["Build"].append("Bau-Boom bestätigt")
-
-        # Supply
-        if perf_emxc > 5:
-            s["Global Supply"] += 3
-            details["Global Supply"].append(f"Supply-Chain Momentum: +{perf_emxc:.1f}%")
+        for layer, cfg in CONFIG.items():
+            score = 0
+            log = []
+            
+            # A. Technisches Momentum (6 Monate)
+            etf = cfg["etfs"][0]
+            perf = (prices[etf].iloc[-1] / prices[etf].iloc[-126] - 1) * 100
+            if perf > 10: 
+                score += 3
+                log.append(f"Momentum: +{perf:.1f}%")
+            
+            # B. Fundamentale Häkchen
+            if layer == "Hardware" and f_capex: score += 4; log.append("News: CapEx-Hürde genommen")
+            if layer == "Power" and f_power: score += 5; log.append("News: Energie-Vorteil")
+            if layer == "Build" and f_build: score += 4; log.append("News: Bau-Volumen")
+            
+            scores[layer] = score
+            analysis_log[layer] = log
 
         # Anzeige der Ergebnisse
-        st.success(f"### 🎯 Empfehlung: {max(s, key=s.get)}")
+        best = max(scores, key=scores.get)
+        st.success(f"### 🎯 Primärer Fokus-Layer: {best}")
         
-        res = st.columns(4)
-        for i, (k, v) in enumerate(s.items()):
-            with res[i]:
-                st.metric(k, f"{v}/10")
-                st.progress(min(v/10.0, 1.0))
-                # Der neue Transparenz-Layer:
-                for line in details[k]:
-                    st.caption(line)
+        cols = st.columns(4)
+        for i, (layer, score) in enumerate(scores.items()):
+            with cols[i]:
+                st.markdown(f"<h3 style='color:{CONFIG[layer]['color']}'>{layer}</h3>", unsafe_allow_html=True)
+                st.metric("Score", f"{score}/10")
+                st.progress(score/10.0)
+                for entry in analysis_log[layer]:
+                    st.caption(f"✅ {entry}")
 
-st.caption(f"Datenquelle: Yahoo Finance | Stand: {datetime.now().strftime('%H:%M:%S')}")
+        # 4. DEEP DIVE: NEWS & FUNDAMENTALS FÜR DEN GEWINNER
+        st.markdown("---")
+        st.subheader(f"📑 Deep Dive: {best} Top-Positionen & News")
+        
+        d_col1, d_col2 = st.columns([1, 2])
+        
+        with d_col1:
+            st.write("**Top-Holdings Check:**")
+            for stock_sym in CONFIG[best]["top_stocks"]:
+                s_info = yf.Ticker(stock_sym).info
+                pe = s_info.get('forwardPE', 'N/A')
+                st.write(f"- **{stock_sym}**: KGV {pe}")
+        
+        with d_col2:
+            st.write("**Strategisches News-Radar (Keywords):**")
+            st.caption(f"Scannt auf: {', '.join(CONFIG[best]['keywords'])}")
+            news = yf.Ticker(CONFIG[best]["top_stocks"][0]).news
+            for n in news[:3]:
+                st.markdown(f"▫️ [{n['title']}]({n['link']})")
+
+st.caption(f"Letztes Update: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')} | Konfiguration: AI_INFRA_2026")
