@@ -161,62 +161,119 @@ def fetch_layer_data(period: str = "1y") -> Optional[pd.DataFrame]:
 
 
 @st.cache_data(ttl=600, show_spinner=False)  # Cache for 10 minutes
-def fetch_news(ticker: str, max_items: int = 10) -> List[Dict]:
+def fetch_news_from_google(query: str, max_items: int = 10) -> List[Dict]:
     """
-    Fetch news for a specific ticker with robust validation
+    Fetch news from Google News RSS as fallback
+    
+    Args:
+        query: Search query (e.g., "NVDA", "Nvidia AI")
+        max_items: Maximum number of news items
+        
+    Returns:
+        List of news dictionaries
+    """
+    try:
+        # Try to import feedparser (needs to be installed: pip install feedparser)
+        try:
+            import feedparser
+        except ImportError:
+            logger.warning("feedparser not installed. Run: pip install feedparser")
+            return []
+        
+        from urllib.parse import quote
+        
+        # Google News RSS URL
+        encoded_query = quote(query)
+        rss_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
+        
+        logger.info(f"Fetching Google News RSS for query: {query}")
+        feed = feedparser.parse(rss_url)
+        
+        if not feed.entries:
+            logger.warning(f"No Google News entries for query: {query}")
+            return []
+        
+        news_items = []
+        for entry in feed.entries[:max_items]:
+            news_items.append({
+                'title': entry.get('title', 'No Title'),
+                'link': entry.get('link', '#'),
+                'publisher': entry.get('source', {}).get('title', 'Google News'),
+                'timestamp': entry.get('published_parsed', 0)
+            })
+        
+        logger.info(f"Successfully fetched {len(news_items)} items from Google News")
+        return news_items
+        
+    except Exception as e:
+        logger.error(f"Error fetching Google News: {str(e)}")
+        return []
+
+
+@st.cache_data(ttl=600, show_spinner=False)  # Cache for 10 minutes
+def fetch_news(ticker: str, layer_name: str = "", max_items: int = 10) -> List[Dict]:
+    """
+    Fetch news for a specific ticker with robust validation and fallback
     
     Args:
         ticker: Stock ticker symbol
+        layer_name: Layer name for better Google search query
         max_items: Maximum number of news items to return
         
     Returns:
         List of valid news dictionaries with title, link, and publisher
     """
+    # Try yfinance first
     try:
         logger.info(f"Fetching news for ticker: {ticker}")
         
-        # Fetch from yfinance
         ticker_obj = yf.Ticker(ticker)
         raw_news = ticker_obj.news
         
-        if not raw_news:
-            logger.warning(f"No news returned from yfinance for {ticker}")
-            return []
-        
-        logger.info(f"Raw news count for {ticker}: {len(raw_news)}")
-        
-        # Validate and clean news items
-        valid_news = []
-        for item in raw_news:
-            # Extract and validate required fields
-            title = item.get('title') or item.get('headline') or ""
-            link = item.get('link') or ""
-            publisher = item.get('publisher') or item.get('providerPublishTime') or "Unknown"
+        if raw_news:
+            logger.info(f"Raw news count for {ticker}: {len(raw_news)}")
             
-            # Only include news with valid title AND link
-            if title.strip() and link.strip() and link != "#":
-                valid_news.append({
-                    'title': title.strip(),
-                    'link': link.strip(),
-                    'publisher': publisher if isinstance(publisher, str) else "Unknown",
-                    'timestamp': item.get('providerPublishTime', 0)
-                })
-            else:
-                logger.debug(f"Skipping invalid news item: title={bool(title)}, link={bool(link)}")
+            # Validate and clean news items
+            valid_news = []
+            for item in raw_news:
+                title = item.get('title') or item.get('headline') or ""
+                link = item.get('link') or ""
+                publisher = item.get('publisher') or item.get('providerPublishTime') or "Unknown"
+                
+                # Only include news with valid title AND link
+                if title.strip() and link.strip() and link != "#":
+                    valid_news.append({
+                        'title': title.strip(),
+                        'link': link.strip(),
+                        'publisher': publisher if isinstance(publisher, str) else "Unknown",
+                        'timestamp': item.get('providerPublishTime', 0)
+                    })
+            
+            if valid_news:
+                # Sort by timestamp (newest first)
+                valid_news.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
+                logger.info(f"Successfully validated {len(valid_news)} news items for {ticker}")
+                return valid_news[:max_items]
         
-        if not valid_news:
-            logger.warning(f"No valid news items found for {ticker} after filtering")
-            return []
-        
-        # Sort by timestamp (newest first)
-        valid_news.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
-        
-        logger.info(f"Successfully validated {len(valid_news)} news items for {ticker}")
-        return valid_news[:max_items]
+        logger.warning(f"No valid news from yfinance for {ticker}, trying Google News fallback...")
         
     except Exception as e:
-        logger.error(f"Error fetching news for {ticker}: {str(e)}", exc_info=True)
-        return []
+        logger.error(f"yfinance error for {ticker}: {str(e)}")
+    
+    # Fallback to Google News
+    try:
+        # Create better search query
+        search_query = f"{ticker} stock news" if not layer_name else f"{ticker} {layer_name} news"
+        google_news = fetch_news_from_google(search_query, max_items)
+        
+        if google_news:
+            logger.info(f"Using Google News fallback for {ticker}: {len(google_news)} items")
+            return google_news
+        
+    except Exception as e:
+        logger.error(f"Google News fallback failed for {ticker}: {str(e)}")
+    
+    return []
 
 
 # ============================================================================
@@ -488,12 +545,9 @@ def render_news_feed(layer_config: LayerConfig, news_items: List[Dict], score: i
     
     # Handle empty news
     if not news_items:
-        st.warning(f"📭 Keine validen News für **{layer_config.news_ticker}** verfügbar.")
+        st.warning(f"📭 Keine News für **{layer_config.news_ticker}** verfügbar.")
         if debug:
-            st.caption("Mögliche Gründe: yfinance API-Limit, keine aktuellen News, oder Ticker nicht gefunden")
-        
-        # Suggest alternative
-        st.info(f"💡 Alternative: Suche manuell nach '{layer_config.news_ticker} news' auf Google Finance")
+            st.caption("⚠️ Sowohl yfinance als auch Google News lieferten keine Ergebnisse")
         return
     
     # Scrollable news container
@@ -706,7 +760,7 @@ def main():
             for tab, (key, layer) in zip(tabs, LAYERS.items()):
                 with tab:
                     with st.spinner(f"Lade News für {layer.name}..."):
-                        news_items = fetch_news(layer.news_ticker, max_items=10)
+                        news_items = fetch_news(layer.news_ticker, layer.description, max_items=10)
                     
                     render_news_feed(layer, news_items, layer_scores[key], compact=False, debug=debug_mode)
         
@@ -717,7 +771,7 @@ def main():
             for idx, (key, layer) in enumerate(LAYERS.items()):
                 with news_cols[idx % 2]:
                     with st.spinner(f"Lade News für {layer.name}..."):
-                        news_items = fetch_news(layer.news_ticker, max_items=5)
+                        news_items = fetch_news(layer.news_ticker, layer.description, max_items=5)
                     
                     render_news_feed(layer, news_items, layer_scores[key], compact=True, debug=debug_mode)
         
