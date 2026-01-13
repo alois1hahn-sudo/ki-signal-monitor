@@ -3,100 +3,112 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime
 
-# 1. SETUP
-st.set_page_config(page_title="KI-Invest Cockpit", layout="wide")
+# 1. SETUP & CONFIG (Deine Keywords sind hier hinterlegt)
+st.set_page_config(page_title="AI Infra Monitor", layout="wide")
 
 CONFIG = {
-    "Hardware (SEMI)": {"etf": "SMH", "stock": "NVDA", "color": "#1E90FF", 
-        "info": "Hardware-Infrastruktur"},
-    "Power (WUTI)": {"etf": "XLU", "stock": "NEE", "color": "#FFD700", 
-        "info": "Energie-Versorgung"},
-    "Build (XLI)": {"etf": "XLI", "stock": "CAT", "color": "#32CD32", 
-        "info": "Physischer Bau"},
-    "MidCap (SPY4)": {"etf": "IJH", "stock": "PSTG", "color": "#FF4500", 
-        "info": "Markt-Rotation"}
+    "Hardware (SEMI)": {
+        "etf": "SMH", "stock": "NVDA", "color": "#1E90FF",
+        "keywords": ["Blackwell", "CapEx", "TSMC", "HBM", "GPU", "Demand"],
+        "info": "Fokus: Rechenpower & Chip-Nachfrage"},
+    "Power (WUTI)": {
+        "etf": "XLU", "stock": "NEE", "color": "#FFD700",
+        "keywords": ["Nuclear", "PPA", "Grid", "SMR", "Electricity", "Data Center"],
+        "info": "Fokus: Energie-Infrastruktur & Deals"},
+    "Build (XLI)": {
+        "etf": "XLI", "stock": "CAT", "color": "#32CD32",
+        "keywords": ["Backlog", "Construction", "Data Center", "Cooling", "HVAC"],
+        "info": "Fokus: Physische Errichtung & Kühlung"},
+    "MidCap (SPY4)": {
+        "etf": "IJH", "stock": "PSTG", "color": "#FF4500",
+        "keywords": ["Rotation", "Small Cap", "Broadening", "Specialist"],
+        "info": "Fokus: Nischen-Anbieter & Marktbreite"}
 }
 
 st.title("🛡️ Strategisches KI-Invest Cockpit")
 
-# NEU: Maßstab-Erklärung ganz oben
-with st.expander("ℹ️ Verwendete Maßstäbe & Logik"):
-    st.write("**Zeit-Maßstab:** Alle Prozentwerte beziehen sich auf die Performance der letzten **6 Monate**.")
-    st.write("**Markt-Maßstab:** Die relative Stärke wird im Vergleich zum **S&P 500 (SPY)** gemessen.")
-    st.write("**Schwellenwerte:** Momentum > 15% | Relative Stärke > 1%.")
-
-st.markdown("---")
-
-# 2. MARKT-AMPEL
-st.subheader("🚦 Globale Markt-Ampel")
-try:
+# 2. MARKT-AMPEL & PORTFOLIO
+with st.expander("📊 Markt-Ampel & Portfolio-Links"):
     m_d = yf.download(["^VIX", "^TNX", "SPY"], period="5d", progress=False)['Close']
     c1, c2, c3 = st.columns(3)
-    c1.metric("Markt-Angst (VIX)", f"{m_d['^VIX'].iloc[-1]:.2f}", help="Maßstab: <20 ist ruhig")
-    c2.metric("US 10J Zinsen", f"{m_d['^TNX'].iloc[-1]:.2f}%", help="Maßstab: Referenz für Kreditkosten")
-    c3.info("Maßstab: Der S&P 500 (SPY) dient als Benchmark für alle Berechnungen.")
-except: st.write("Lade Daten...")
+    c1.metric("VIX", f"{m_d['^VIX'].iloc[-1]:.2f}")
+    c2.metric("Zinsen 10J", f"{m_d['^TNX'].iloc[-1]:.2f}%")
+    st.markdown("---")
+    watchlist = {"MSCI World": "IWDA.AS", "InfoTech": "TNOW.PA", "Industrials": "XLI", "Semicon": "SEMI.AS", "Utilities": "WUTI.SW", "MidCap": "SPY4.DE"}
+    cols = st.columns(len(watchlist))
+    for i, (n, t) in enumerate(watchlist.items()):
+        cols[i].markdown(f"**[{n}](https://finance.yahoo.com/quote/{t})**")
 
-st.markdown("---")
-
-# 3. SIDEBAR & MANUELLE SIGNALE
-st.sidebar.header("🛠️ Analyse-Parameter")
-use_mom = st.sidebar.toggle("Momentum (6 Mon. > 15%)", value=True)
-use_rel = st.sidebar.toggle("Rel. Stärke (vs. S&P 500)", value=True)
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("Manuelle Signale")
+# 3. ANALYSE-ENGINE
+st.sidebar.header("🛠️ Strategie-Parameter")
 f1 = st.sidebar.checkbox("Hardware: CapEx-Boom")
-f2 = st.sidebar.checkbox("Power: Energie-Verträge")
-f3 = st.sidebar.checkbox("Build: Bau-Aufträge")
-f4 = st.sidebar.checkbox("MidCap: Breite Erholung")
+f2 = st.sidebar.checkbox("Power: Energie-Deals")
+f3 = st.sidebar.checkbox("Build: Bau-Boom")
 
-# 4. ANALYSE
-if st.button("Analyse mit Maßstab SPY ausführen", type="primary"):
-    with st.spinner('Berechne Relative Stärke...'):
+if st.button("Komplett-Analyse & News-Scan starten", type="primary"):
+    with st.spinner('Berechne Scores und scanne News nach Keywords...'):
         df = yf.download(["SMH", "XLU", "XLI", "IJH", "SPY"], period="1y", progress=False)['Close']
         
-        # Performance Rohdaten (6 Monate = 126 Tage)
-        p_semi = (df['SMH'].iloc[-1]/df['SMH'].iloc[-126]-1)*100
-        p_pwr = (df['XLU'].iloc[-1]/df['XLU'].iloc[-126]-1)*100
-        p_bld = (df['XLI'].iloc[-1]/df['XLI'].iloc[-126]-1)*100
-        p_mid = (df['IJH'].iloc[-1]/df['IJH'].iloc[-126]-1)*100
+        # Performance-Messung (Maßstab: 6 Monate vs S&P 500)
         p_spy = (df['SPY'].iloc[-1]/df['SPY'].iloc[-126]-1)*100
-
+        
         scores = {k: 0 for k in CONFIG.keys()}
-        details = {k: [] for k in CONFIG.keys()}
+        results_data = {}
 
-        for layer in CONFIG.keys():
-            # A. Momentum (Absolut)
-            if use_mom:
-                val = {"Hardware (SEMI)": p_semi, "Power (WUTI)": p_pwr, 
-                       "Build (XLI)": p_bld, "MidCap (SPY4)": p_mid}[layer]
-                if val > 15:
-                    scores[layer] += 3
-                    details[layer].append(f"📈 Momentum: +{val:.1f}% (Maßstab >15% Erreicht)")
-
-            # B. Rel. Stärke (vs S&P 500)
-            if use_rel:
-                rel_val = {"Hardware (SEMI)": p_semi - p_spy, "Power (WUTI)": p_pwr - p_spy, 
-                           "Build (XLI)": p_bld - p_spy, "MidCap (SPY4)": p_mid - p_spy}[layer]
-                if rel_val > 1:
-                    scores[layer] += 3
-                    details[layer].append(f"📊 Rel. zum Markt: +{rel_val:.1f}% (Besser als S&P 500)")
-
-            # C. Manuelle Signale
-            check = {"Hardware (SEMI)": f1, "Power (WUTI)": f2, 
-                     "Build (XLI)": f3, "MidCap (SPY4)": f4}[layer]
-            if check:
+        for layer, cfg in CONFIG.items():
+            etf_perf = (df[cfg['etf']].iloc[-1]/df[cfg['etf']].iloc[-126]-1)*100
+            rel_strength = etf_perf - p_spy
+            
+            # Scoring
+            if etf_perf > 15: scores[layer] += 3
+            if rel_strength > 1: scores[layer] += 3
+            if (layer == "Hardware (SEMI)" and f1) or (layer == "Power (WUTI)" and f2) or (layer == "Build (XLI)" and f3):
                 scores[layer] += 4
-                details[layer].append("💎 Fundamentaler Bonus (Manuelles Signal)")
+            
+            results_data[layer] = {"perf": etf_perf, "rel": rel_strength}
 
-        # ANZEIGE
+        # ANZEIGE DER SCORES
+        st.header("1️⃣ Analyse-Ergebnisse")
         res_cols = st.columns(4)
         for i, (layer, score) in enumerate(scores.items()):
             with res_cols[i]:
                 st.markdown(f"<h4 style='color:{CONFIG[layer]['color']}'>{layer}</h4>", unsafe_allow_html=True)
-                st.metric("Gesamt-Score", f"{score}/10")
+                st.metric("Score", f"{score}/10")
                 st.progress(score/10.0)
-                for d in details[layer]: st.info(d)
+                st.caption(f"Momentum: {results_data[layer]['perf']:.1f}%")
+                st.caption(f"Rel. Stärke: {results_data[layer]['rel']:.1f}%")
 
-st.caption(f"Update: {datetime.now().strftime('%d.%m.%Y')} | Referenzmarkt: S&P 500 Index")
+        # 4. KEYWORD NEWS SCANNER
+        st.markdown("---")
+        best_layer = max(scores, key=scores.get)
+        st.header(f"2️⃣ Strategisches News-Radar: {best_layer}")
+        
+        target_stock = CONFIG[best_layer]["stock"]
+        keywords = CONFIG[best_layer]["keywords"]
+        
+        try:
+            news_items = yf.Ticker(target_stock).news
+            if news_items:
+                found_news = 0
+                for n in news_items:
+                    title = n.get('title', '')
+                    # Checke, ob Keywords im Titel vorkommen
+                    match = [word for word in keywords if word.lower() in title.lower()]
+                    
+                    # Anzeige der News
+                    col_a, col_b = st.columns([1, 4])
+                    with col_a:
+                        if match: st.warning(f"🎯 {match[0]}")
+                        else: st.write("🔹 News")
+                    with col_b:
+                        st.markdown(f"**[{title}]({n.get('link', '#')})**")
+                        st.caption(f"Quelle: {n.get('publisher', 'Unbekannt')}")
+                    
+                    found_news += 1
+                    if found_news >= 5: break
+            else:
+                st.write("Keine aktuellen Nachrichten gefunden.")
+        except:
+            st.write("Fehler beim Abruf der News-Schnittstelle.")
+
+st.caption(f"Referenz-Maßstab: S&P 500 (SPY) | Stand: {datetime.now().strftime('%d.%m.%Y')}")
